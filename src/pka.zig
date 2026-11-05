@@ -12,7 +12,7 @@ const Model = model_mod.Model;
 const Vec3f32 = math.Vec3(f32);
 
 pub const schema_version = "zhyd.protonation.v1";
-pub const parameter_version = "zhyd-pka-protein-v0.1";
+pub const parameter_version = "zhyd-pka-protein-v0.2";
 
 pub const SiteKind = enum {
     asp,
@@ -47,6 +47,21 @@ pub const SiteKind = enum {
 
 pub const Confidence = enum { high, medium, low };
 
+/// Why a titratable residue was deliberately not given a pKa.
+pub const ExclusionReason = enum {
+    /// Cystine sulfur: no titratable proton.
+    disulfide,
+    /// Side-chain ligand of a metal ion; the metal-bound state is outside
+    /// this model and must not be guessed from protein-only terms.
+    metal_coordinated,
+};
+
+pub const ExcludedSite = struct {
+    residue_idx: u32,
+    kind: SiteKind,
+    reason: ExclusionReason,
+};
+
 pub const Contributions = struct {
     model: f32,
     burial: f32 = 0,
@@ -73,30 +88,65 @@ pub const SiteResult = struct {
 pub const Prediction = struct {
     allocator: std.mem.Allocator,
     sites: []SiteResult,
+    excluded: []ExcludedSite = &.{},
     omitted_sites: u32,
+    /// Version string of the parameter set that produced these values.
+    parameter_version: []const u8 = parameter_version,
 
     pub fn deinit(self: *Prediction) void {
         self.allocator.free(self.sites);
+        self.allocator.free(self.excluded);
         self.sites = &.{};
+        self.excluded = &.{};
     }
 };
 
-/// All values are deliberately versioned and centralized.  They are initial
-/// scientific priors, not fitted production parameters.
+/// All values are deliberately versioned and centralized.
+///
+/// v0.2: `burial_max_shift`, `hbond_strength` and `hbond_max_shift` were fitted
+/// by coordinate descent on the PKAD-R training split only (train MAE; see
+/// scripts/pka/params/zhyd-pka-protein-v0.2.json). The fit removed the burial
+/// shift: with the current neighbor-count descriptor it did not improve
+/// training error. Burial is still computed for confidence and strata. This
+/// is a known weakness for deeply buried groups (SNase stress set).
+/// v0.1 priors were burial 2.0, hbond strength 0.35, hbond max 1.5.
 pub const Parameters = struct {
     version: []const u8 = parameter_version,
     burial_radius: f32 = 10.0,
     burial_surface_count: f32 = 12.0,
     burial_core_count: f32 = 55.0,
-    burial_max_shift: f32 = 2.0,
+    burial_max_shift: f32 = 0.0,
     hbond_cutoff: f32 = 4.0,
-    hbond_max_shift: f32 = 1.5,
+    hbond_max_shift: f32 = 0.75,
+    hbond_strength: f32 = 0.5,
     fixed_charge_scale: f32 = 1.2,
     coupling_scale: f32 = 1.0,
     coupling_cutoff: f32 = 12.0,
     coupling_iterations: u8 = 24,
     convergence_tolerance: f32 = 0.001,
 };
+
+/// Parse a parameter set from JSON. Missing fields keep their defaults, unknown
+/// fields are rejected so typos cannot silently fall back to defaults. A custom
+/// set must carry its own `version` so reports never mislabel it.
+pub fn parseParameters(allocator: std.mem.Allocator, json: []const u8) !std.json.Parsed(Parameters) {
+    const parsed = try std.json.parseFromSlice(Parameters, allocator, json, .{ .ignore_unknown_fields = false, .allocate = .alloc_always });
+    errdefer parsed.deinit();
+    if (std.mem.eql(u8, parsed.value.version, parameter_version)) {
+        // Only the built-in defaults may use the built-in version label.
+        if (!sameValues(parsed.value, .{})) return error.ParameterVersionRequired;
+    }
+    return parsed;
+}
+
+/// Compare every numeric field, ignoring the version label.
+fn sameValues(a: Parameters, b: Parameters) bool {
+    inline for (std.meta.fields(Parameters)) |field| {
+        if (comptime std.mem.eql(u8, field.name, "version")) continue;
+        if (@field(a, field.name) != @field(b, field.name)) return false;
+    }
+    return true;
+}
 
 pub const Config = struct {
     parameters: Parameters = .{},
@@ -125,11 +175,16 @@ pub fn modelPka(kind: SiteKind) f32 {
 
 /// Predict pKa values for standard protein side chains and peptide termini.
 /// Ligands, nucleic acids, metals, and alternate-location ensembles are out of
-/// scope for this first model and are never guessed silently.
+/// scope for this first model and are never guessed silently: disulfide and
+/// metal-coordinated residues are listed in `excluded` with a reason.
 pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, config: Config) !Prediction {
     var candidates: std.ArrayListUnmanaged(Candidate) = .empty;
     defer candidates.deinit(allocator);
+    var excluded: std.ArrayListUnmanaged(ExcludedSite) = .empty;
+    errdefer excluded.deinit(allocator);
     var omitted: u32 = 0;
+    const metals = try metalPositions(allocator, mdl);
+    defer allocator.free(metals);
 
     for (mdl.residues.items, 0..) |res, res_idx| {
         const comp_id = res.compIdSlice();
@@ -139,9 +194,8 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, config: Config) 
         if (res.entity_type != .polymer and !isStandardAminoAcid(comp_id)) continue;
         const kind: ?SiteKind = if (std.mem.eql(u8, comp_id, "ASP")) .asp else if (std.mem.eql(u8, comp_id, "GLU")) .glu else if (std.mem.eql(u8, comp_id, "HIS")) .his else if (std.mem.eql(u8, comp_id, "LYS")) .lys else if (std.mem.eql(u8, comp_id, "CYS")) .cys else if (std.mem.eql(u8, comp_id, "TYR")) .tyr else null;
         if (kind) |k| {
-            // A cystine SG has no titratable proton; it is not a site.
-            if (k == .cys and isCovalentlyBondedCys(mdl, @intCast(res_idx))) {
-                // fall through to terminus handling below
+            if (exclusionReason(mdl, @intCast(res_idx), k, metals)) |reason| {
+                try excluded.append(allocator, .{ .residue_idx = @intCast(res_idx), .kind = k, .reason = reason });
             } else if (siteCenter(mdl, @intCast(res_idx), k)) |center| {
                 try candidates.append(allocator, .{ .residue_idx = @intCast(res_idx), .kind = k, .center = center });
             } else omitted += 1;
@@ -186,7 +240,8 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, config: Config) 
     }
     for (sites) |*site| site.confidence = assessConfidence(site.*);
 
-    return .{ .allocator = allocator, .sites = sites, .omitted_sites = omitted };
+    const excluded_slice = try excluded.toOwnedSlice(allocator);
+    return .{ .allocator = allocator, .sites = sites, .excluded = excluded_slice, .omitted_sites = omitted, .parameter_version = config.parameters.version };
 }
 
 fn isStandardAminoAcid(comp_id: []const u8) bool {
@@ -211,6 +266,48 @@ fn siteCenter(mdl: *const Model, residue_idx: u32, kind: SiteKind) ?Vec3f32 {
         .n_term => namedAtom(mdl, residue_idx, "N"),
         .c_term => namedAtom(mdl, residue_idx, "OXT") orelse namedAtom(mdl, residue_idx, "O"),
     };
+}
+
+/// Maximum ligand-atom–metal distance treated as coordination. Typical
+/// protein metal-ligand bonds are 1.9–2.6 Å; 2.8 Å tolerates coordinate error.
+const metal_coordination_max_distance: f32 = 2.8;
+
+pub fn metalPositions(allocator: std.mem.Allocator, mdl: *const Model) ![]Vec3f32 {
+    var list: std.ArrayListUnmanaged(Vec3f32) = .empty;
+    errdefer list.deinit(allocator);
+    for (mdl.atoms.items) |atom| {
+        if (atom.element_type.info().flags.metallic or atom.flags.metallic) try list.append(allocator, atom.pos);
+    }
+    return list.toOwnedSlice(allocator);
+}
+
+/// Side-chain atoms that can coordinate a metal for each site kind.
+fn ligandAtomNames(kind: SiteKind) []const []const u8 {
+    return switch (kind) {
+        .asp => &.{ "OD1", "OD2" },
+        .glu => &.{ "OE1", "OE2" },
+        .his => &.{ "ND1", "NE2" },
+        .lys => &.{"NZ"},
+        .cys => &.{"SG"},
+        .tyr => &.{"OH"},
+        .n_term, .c_term => &.{},
+    };
+}
+
+pub fn isMetalCoordinated(mdl: *const Model, residue_idx: u32, kind: SiteKind, metals: []const Vec3f32) bool {
+    for (ligandAtomNames(kind)) |name| {
+        const pos = namedAtom(mdl, residue_idx, name) orelse continue;
+        for (metals) |metal| {
+            if (pos.distance(metal) <= metal_coordination_max_distance) return true;
+        }
+    }
+    return false;
+}
+
+fn exclusionReason(mdl: *const Model, residue_idx: u32, kind: SiteKind, metals: []const Vec3f32) ?ExclusionReason {
+    if (kind == .cys and isCovalentlyBondedCys(mdl, residue_idx)) return .disulfide;
+    if (isMetalCoordinated(mdl, residue_idx, kind, metals)) return .metal_coordinated;
+    return null;
 }
 
 /// Maximum SG–SG distance treated as a disulfide bond (typical 2.03–2.05 Å).
@@ -253,10 +350,21 @@ fn midpoint(a: ?Vec3f32, b: ?Vec3f32) ?Vec3f32 {
     return .{ .x = (av.x + bv.x) * 0.5, .y = (av.y + bv.y) * 0.5, .z = (av.z + bv.z) * 0.5 };
 }
 
+/// Water is the reference environment of the model pKa values, so explicit
+/// solvent must not count as burial or as a protein hydrogen-bond partner.
+fn isSolvent(mdl: *const Model, residue_idx: u32) bool {
+    const res = mdl.residues.items[residue_idx];
+    if (res.entity_type == .water) return true;
+    const comp = res.compIdSlice();
+    return std.mem.eql(u8, comp, "HOH") or std.mem.eql(u8, comp, "WAT") or
+        std.mem.eql(u8, comp, "DOD") or std.mem.eql(u8, comp, "H2O");
+}
+
 fn burialFraction(mdl: *const Model, site: Candidate, params: Parameters) f32 {
     var count: f32 = 0;
     for (mdl.atoms.items) |atom| {
         if (atom.is_hydrogen or atom.residue_idx == site.residue_idx) continue;
+        if (isSolvent(mdl, atom.residue_idx)) continue;
         if (atom.altloc != ' ' and atom.altloc != 'A') continue;
         const d = atom.pos.distance(site.center);
         if (d >= params.burial_radius) continue;
@@ -274,14 +382,15 @@ fn hbondContribution(mdl: *const Model, site: Candidate, params: Parameters) f32
     var score: f32 = 0;
     for (mdl.atoms.items) |atom| {
         if (atom.is_hydrogen or atom.residue_idx == site.residue_idx) continue;
+        if (isSolvent(mdl, atom.residue_idx)) continue;
         if (atom.altloc != ' ' and atom.altloc != 'A') continue;
         const d = atom.pos.distance(site.center);
         if (d < 2.0 or d >= params.hbond_cutoff) continue;
         const weight = (params.hbond_cutoff - d) / (params.hbond_cutoff - 2.0);
         if (site.kind.isAcid()) {
-            if (atom.flags.donor or atom.flags.positive) score -= 0.35 * weight;
+            if (atom.flags.donor or atom.flags.positive) score -= params.hbond_strength * weight;
         } else {
-            if (atom.flags.acceptor or atom.flags.negative) score += 0.35 * weight;
+            if (atom.flags.acceptor or atom.flags.negative) score += params.hbond_strength * weight;
         }
     }
     return std.math.clamp(score, -params.hbond_max_shift, params.hbond_max_shift);
@@ -385,6 +494,8 @@ test "disulfide-bonded cysteines are not titratable sites" {
     defer result.deinit();
     for (result.sites) |site| try testing.expect(site.kind != .cys);
     try testing.expectEqual(@as(u32, 0), result.omitted_sites);
+    try testing.expectEqual(@as(usize, 2), result.excluded.len);
+    for (result.excluded) |site| try testing.expectEqual(ExclusionReason.disulfide, site.reason);
 }
 
 test "free cysteine remains a titratable site" {
@@ -402,6 +513,47 @@ test "free cysteine remains a titratable site" {
         if (site.kind == .cys) n_cys += 1;
     }
     try testing.expectEqual(@as(usize, 2), n_cys);
+}
+
+test "parameter files keep defaults and require a custom version" {
+    var parsed = try parseParameters(testing.allocator, "{\"version\": \"custom-1\", \"hbond_strength\": 0.9}");
+    defer parsed.deinit();
+    try testing.expectEqualStrings("custom-1", parsed.value.version);
+    try testing.expectApproxEqAbs(@as(f32, 0.9), parsed.value.hbond_strength, 1e-6);
+    const defaults = Parameters{};
+    try testing.expectApproxEqAbs(defaults.burial_radius, parsed.value.burial_radius, 1e-6);
+    try testing.expectError(error.ParameterVersionRequired, parseParameters(testing.allocator, "{\"hbond_strength\": 0.9}"));
+
+    // The parsed version must outlive the caller's JSON buffer.
+    const buffer = try testing.allocator.dupe(u8, "{\"version\": \"heap-1\"}");
+    var owned = try parseParameters(testing.allocator, buffer);
+    defer owned.deinit();
+    @memset(buffer, 0);
+    testing.allocator.free(buffer);
+    try testing.expectEqualStrings("heap-1", owned.value.version);
+    try testing.expectError(error.UnknownField, parseParameters(testing.allocator, "{\"version\": \"x\", \"hbond_strenght\": 0.5}"));
+}
+
+test "metal-coordinated cysteine is excluded with a reason" {
+    const source = @embedFile("test_data/disulfide.cif");
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    // Break the disulfide, then place a zinc 2.3 Å from the first SG.
+    var first_sg: Vec3f32 = undefined;
+    for (mdl.atoms.items) |*atom| {
+        if (!std.mem.eql(u8, atom.nameSlice(), "SG")) continue;
+        if (atom.residue_idx == 0) first_sg = atom.pos else atom.pos.x += 5.0;
+    }
+    var zn = mdl.atoms.items[0];
+    zn.pos = .{ .x = first_sg.x, .y = first_sg.y + 2.3, .z = first_sg.z };
+    zn.element_type = .Zn;
+    zn.residue_idx = 1;
+    try mdl.atoms.append(testing.allocator, zn);
+    var result = try predict(testing.allocator, &mdl, .{});
+    defer result.deinit();
+    try testing.expectEqual(@as(usize, 1), result.excluded.len);
+    try testing.expectEqual(ExclusionReason.metal_coordinated, result.excluded[0].reason);
+    try testing.expectEqual(@as(u32, 0), result.excluded[0].residue_idx);
 }
 
 test "missing required side-chain atoms are omitted explicitly" {

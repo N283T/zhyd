@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   applied residue states, formal charges, and provenance
   - Disulfide-bonded cysteines are excluded from pKa sites and reported as
     `disulfide_bonded` (source `covalent_bond`) in the state report
+  - Disulfide and metal-coordinated residues are listed in `excluded_sites`
+    with a reason; `run --state-json` warns on metal ligands
+  - Crystal waters no longer count toward burial or hydrogen-bond terms
+  - Parameter set `zhyd-pka-protein-v0.2`, fitted on the PKAD-R training split
+    (`scripts/pka/params/`); `pka --parameters PATH` loads a custom set
+  - PKAD-R normalization, structure fetch, prediction join, and calibration
+    scripts (`scripts/pka/pkadr.py`, `scripts/pka/calibrate.py`)
 - External PROPKA oracle and cluster-split PKAD-R evaluation harness under
   `scripts/pka/`
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)

@@ -1,6 +1,6 @@
 # zhyd protonation and pKa architecture
 
-Status: implementation phase 1; experimental pKa parameters; schema v1.
+Status: phase 3 development run complete; parameters `zhyd-pka-protein-v0.2` (fitted, not accepted for production); schema v1.
 
 ## Scope and constraints
 
@@ -59,7 +59,7 @@ reference pH of 7.0 but sets `applies_to_coordinates=false`. It deliberately has
 no `--ph`: pH-driven coordinate assignment will not be exposed until prediction
 accuracy and state application are validated together.
 
-## Protein v0.1 model
+## Protein pKa model (parameters v0.2)
 
 Supported sites are ASP, GLU, HIS, LYS, CYS, TYR, and observed N/C termini. Each
 prediction is an additive, inspectable decomposition:
@@ -76,15 +76,32 @@ prediction is an additive, inspectable decomposition:
 - **Coupling:** a deterministic mean-field iteration evaluates the expected
   charge of nearby titratable sites at the target site's transition pH.
 
-All parameters are centralized under `zhyd-pka-protein-v0.1`. Bounds prevent a
+All parameters are centralized in `pka.Parameters`. Bounds prevent a
 malformed structure producing unbounded values. Low confidence is assigned to
-deep burial or strong coupling. These are scientific priors, not fitted or
-validated parameters; numerical pKa values must be treated as experimental.
+deep burial or strong coupling.
+
+- `zhyd-pka-protein-v0.1` used hand-set priors (burial 2.0, H-bond 0.35 per
+  contact, cap 1.5).
+- `zhyd-pka-protein-v0.2` (current) fits `burial_max_shift`, `hbond_strength`
+  and `hbond_max_shift` on the PKAD-R training split only. The fit sets the
+  burial shift to 0: the neighbor-count descriptor did not lower training
+  error. Burial fraction is still computed for confidence and strata.
+  Provenance: `scripts/pka/params/zhyd-pka-protein-v0.2.json`.
+- `zreduce pka --parameters PATH` loads a JSON parameter set for research or
+  recalibration. Unknown fields are rejected, and a non-default set must carry
+  its own `version`, which the report echoes.
 
 ### Assumptions and fallbacks
 
 - The first blank or `A` conformer is used; no ensemble averaging yet.
 - Missing required site atoms omit the site and increment `omitted_sites`.
+- Disulfide-bonded CYS (SG flagged by `_struct_conn` or SG–SG ≤ 2.5 Å) and
+  side chains with a ligand atom ≤ 2.8 Å from a metal ion are not predicted.
+  They are listed in `excluded_sites` with reason `disulfide` or
+  `metal_coordinated`; `run --state-json` adds the
+  `metal_coordinated_state_not_modeled` warning to metal ligands.
+- Explicit solvent (water entities, HOH/WAT/DOD/H2O) is the reference state of
+  the model pKa values and is ignored by the burial and hydrogen-bond terms.
 - Missing entity metadata falls back only for the 20 standard amino-acid names.
 - C termini use OXT when present, otherwise backbone O.
 - Neutral HIS prediction does not guess HID versus HIE; geometry selection is
@@ -92,9 +109,9 @@ validated parameters; numerical pKa values must be treated as experimental.
 - Existing manual overrides remain authoritative for coordinate placement and
   are recorded as `user_override` by `--state-json`.
 
-### Non-goals for v0.1
+### Non-goals for this phase
 
-Ligand/nucleic-acid pKa, metal coordination, covalent ligand induction, constant-
+Ligand/nucleic-acid pKa, metal-bound protonation states, covalent ligand induction, constant-
 pH ensembles, alternate-conformer ensembles, and exact coupled microstate
 enumeration. Their extension boundary is a new `SiteKind`/site provider and a
 versioned parameter family; none are silently approximated as protein residues.
@@ -135,6 +152,52 @@ SNase mutants remain a named holdout stress test. Dataset source version,
 download date, normalization code revision, PDB revision, parameter version,
 split seed, cluster definition, and executable versions must accompany results.
 
+## Development results (PKAD-R, 2026-11-05)
+
+Data: PKAD-R `PKAD-R-250211.json` (sha256 `9ee3cfb8…`), 915 numeric,
+PDB-mapped entries in 78 clusters / 185 PDB entries; 868 matched to a predicted
+site (the rest are mainly CYS that are disulfide/modified in the deposited
+structure). Split: SHA-256 of cluster id with seed `zhyd-pka-split-v1`, 80 %
+train; SNase is a separate stress family.
+
+| Split | n | null (model pKa) MAE / RMSE | v0.1 MAE / RMSE | v0.2 MAE / RMSE |
+|---|---|---|---|---|
+| train | 633 | 0.76 / 1.09 | 0.87 / 1.28 | 0.69 / 1.05 |
+| test | 133 | 0.85 / 1.35 | 0.91 / 1.34 | 0.80 / 1.35 |
+| SNase stress | 102 | 1.96 / 2.49 | 1.33 / 1.63 | 1.95 / 2.61 |
+
+v0.1 and v0.2 columns include the solvent-exclusion fix.
+
+Findings:
+
+- v0.2 beats the null model on held-out test proteins in MAE, but only by a
+  small margin; RMSE is unchanged. Gains come from surface residues (test
+  surface MAE 0.51 vs 0.67 for v0.1).
+- Buried groups are the main failure. With the burial shift removed, SNase
+  buried residues get worse (MAE 3.28 vs 1.92 for v0.1). The v0.1 burial term
+  helped buried groups but hurt surface ones because its descriptor saturates
+  too early. A better desolvation descriptor (e.g. SASA- or depth-based, with
+  explicit compensation by H-bonds and salt bridges) is the next modeling step.
+- Active-site CYS are poorly predicted (test MAE ≈ 2.3). The PKAD-R CYS set is
+  dominated by low-pKa enzyme thiols that need helix-dipole and backbone-amide
+  terms the model does not have.
+- These numbers are development estimates, not a blind benchmark: test and
+  SNase metrics of an earlier fit were inspected during development, and the
+  solvent fix was found while diagnosing them. Parameters were selected on
+  train rows only.
+
+Reproduce (data are not redistributed; download PKAD-R from the official site):
+
+```sh
+python3 scripts/pka/pkadr.py normalize PKAD-R-250211.json -o canonical.csv
+python3 scripts/pka/pkadr.py fetch canonical.csv --structures structures/
+python3 scripts/pka/pkadr.py predict canonical.csv --structures structures/ \
+    --reports reports/ -o predictions.csv
+python3 scripts/pka/evaluate.py predictions.csv --output metrics.json
+python3 scripts/pka/calibrate.py canonical.csv --structures structures/ \
+    --version my-fit -o fit.json   # train split only
+```
+
 ## Phases and acceptance criteria
 
 ### Phase 0 — behavior inventory (complete)
@@ -157,12 +220,15 @@ split seed, cluster definition, and executable versions must accompany results.
 - Acceptance for production remains blocked until the evaluation thresholds are
   selected before fitting and met on cluster-held-out PKAD-R data.
 
-### Phase 3 — reproducible validation (infrastructure complete; data run pending)
+### Phase 3 — reproducible validation (development run complete)
 
 - External PROPKA runner/parser and canonical evaluator are committed.
 - Leakage-resistant cluster split and required metrics are implemented.
-- Pending: pin a permitted PKAD-R snapshot, define clusters, run baselines, and
-  publish results; run SNase separately.
+- PKAD-R snapshot pinned by hash; clusters, null baseline, v0.1/v0.2 results
+  and SNase stress results recorded above.
+- Pending for acceptance: improved desolvation term, a fresh blind holdout,
+  and thresholds chosen before that holdout is scored. Suggested gate: held-out
+  MAE at least 0.1 below the null model and buried-site MAE below 1.5.
 
 ### Phase 4 — pH-driven state application (not started)
 

@@ -297,3 +297,65 @@ test "real-file: 2hnt — gaps + insertion codes, gamma-thrombin" {
     try verifyBondLengths(&result.model);
     try verifyOutputRoundTrip(testing.allocator, &result.model);
 }
+
+// ============================================================
+// Experimental pKa model on real structures
+// ============================================================
+
+fn loadForPka(allocator: std.mem.Allocator, path: []const u8) !zreduce.model.Model {
+    const source = try zreduce.run.readFile(allocator, path);
+    defer allocator.free(source);
+    var mdl = try mmcif.parseModel(allocator, source);
+    errdefer mdl.deinit();
+    place.applyChemistry(&mdl);
+    return mdl;
+}
+
+test "real-file pka: 2cf8 disulfide cysteines excluded, values bounded, deterministic" {
+    var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
+    defer mdl.deinit();
+    var first = try zreduce.pka.predict(testing.allocator, &mdl, .{});
+    defer first.deinit();
+    var second = try zreduce.pka.predict(testing.allocator, &mdl, .{});
+    defer second.deinit();
+
+    // Thrombin heavy+light chains: every cysteine is in a disulfide.
+    var n_disulfide: usize = 0;
+    for (first.excluded) |site| {
+        if (site.reason == .disulfide) n_disulfide += 1;
+    }
+    try testing.expect(n_disulfide >= 8);
+    for (first.sites) |site| try testing.expect(site.kind != .cys);
+
+    try testing.expect(first.sites.len > 50);
+    try testing.expectEqual(first.sites.len, second.sites.len);
+    for (first.sites, second.sites) |a, b| {
+        try testing.expect(a.predicted_pka >= -2.0 and a.predicted_pka <= 16.0);
+        try testing.expectEqual(a.predicted_pka, b.predicted_pka);
+    }
+}
+
+test "real-file pka: crystal waters do not change structure terms" {
+    var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
+    defer mdl.deinit();
+    var with_water = try zreduce.pka.predict(testing.allocator, &mdl, .{ .include_coupling = false });
+    defer with_water.deinit();
+
+    // Move every water far away; burial and H-bond terms must be identical.
+    var n_water: usize = 0;
+    for (mdl.atoms.items) |*atom| {
+        const comp = mdl.residues.items[atom.residue_idx].compIdSlice();
+        if (!std.mem.eql(u8, comp, "HOH")) continue;
+        atom.pos = .{ .x = 1.0e4, .y = 1.0e4, .z = 1.0e4 };
+        n_water += 1;
+    }
+    try testing.expect(n_water > 0);
+    var without_water = try zreduce.pka.predict(testing.allocator, &mdl, .{ .include_coupling = false });
+    defer without_water.deinit();
+
+    for (with_water.sites, without_water.sites) |a, b| {
+        try testing.expectEqual(a.terms.burial, b.terms.burial);
+        try testing.expectEqual(a.terms.hydrogen_bond, b.terms.hydrogen_bond);
+        try testing.expectEqual(a.burial_fraction, b.burial_fraction);
+    }
+}

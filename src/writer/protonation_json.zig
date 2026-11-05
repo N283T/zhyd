@@ -5,6 +5,7 @@ const model_mod = @import("../model.zig");
 const pka = @import("../pka.zig");
 const protonation = @import("../place/protonation.zig");
 const terminal = @import("../place/terminal.zig");
+const math = @import("../math.zig");
 
 pub const ReportModel = struct {
     model_num: u32,
@@ -38,6 +39,8 @@ pub fn writeStateReport(
     try writer.writeAll(",\n  \"parameter_version\": null,\n  \"models\": [\n");
     for (models, 0..) |entry, model_i| {
         try writer.print("    {{\"model\": {d}, \"sites\": [\n", .{entry.model_num});
+        const metals = try pka.metalPositions(entry.model.allocator, entry.model);
+        defer entry.model.allocator.free(metals);
         var first = true;
         for (entry.model.residues.items, 0..) |res, res_idx| {
             const comp = res.compIdSlice();
@@ -45,7 +48,7 @@ pub fn writeStateReport(
             if (kind) |k| {
                 if (!first) try writer.writeAll(",\n");
                 first = false;
-                try writeAppliedSite(writer, entry.model, @intCast(res_idx), k, overrides, nterm_mode);
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), k, overrides, nterm_mode, metals);
             }
             const chain = entry.model.chains.items[res.chain_idx];
             const is_nterm = res_idx == chain.residue_start or
@@ -55,12 +58,12 @@ pub fn writeStateReport(
             if (is_nterm) {
                 if (!first) try writer.writeAll(",\n");
                 first = false;
-                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .n_term, overrides, nterm_mode);
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .n_term, overrides, nterm_mode, metals);
             }
             if (is_cterm) {
                 if (!first) try writer.writeAll(",\n");
                 first = false;
-                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .c_term, overrides, nterm_mode);
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .c_term, overrides, nterm_mode, metals);
             }
         }
         try writer.writeAll("\n    ]}");
@@ -85,10 +88,16 @@ fn writeAppliedSite(
     kind: pka.SiteKind,
     overrides: ?*const protonation.ProtonationOverrides,
     nterm_mode: terminal.NtermMode,
+    metals: []const math.Vec3(f32),
 ) !void {
     const res = mdl.residues.items[residue_idx];
     const chain = mdl.chains.items[res.chain_idx];
-    const state = appliedState(mdl, residue_idx, kind, overrides, nterm_mode);
+    var state = appliedState(mdl, residue_idx, kind, overrides, nterm_mode);
+    // The applied state comes from protein-only rules; flag metal ligands so
+    // downstream charge models do not trust it blindly.
+    if (state.warning == null and pka.isMetalCoordinated(mdl, residue_idx, kind, metals)) {
+        state.warning = "metal_coordinated_state_not_modeled";
+    }
     try writer.writeAll("      {\"id\": {\"chain_label\": \"");
     try writeJsonString(writer, chain.labelSlice());
     try writer.writeAll("\", \"chain_auth\": \"");
@@ -198,32 +207,19 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
     try writer.writeAll("  \"input\": \"");
     try writeJsonString(writer, input);
     try writer.writeAll("\",\n  \"parameter_version\": \"");
-    try writeJsonString(writer, pka.parameter_version);
+    const version = if (models.len > 0) models[0].prediction.parameter_version else pka.parameter_version;
+    try writeJsonString(writer, version);
     try writer.writeAll("\",\n  \"reference_ph_for_recommended_state\": 7.0,\n");
-    try writer.writeAll("  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"protein_v0.1_requires_external_validation\"],\n");
+    try writer.writeAll("  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"buried_sites_poorly_modeled\"],\n");
     try writer.writeAll("  \"models\": [\n");
 
     for (models, 0..) |entry, model_i| {
         try writer.print("    {{\"model\": {d}, \"omitted_sites\": {d}, \"sites\": [\n", .{ entry.model_num, entry.prediction.omitted_sites });
         for (entry.prediction.sites, 0..) |site, site_i| {
-            const res = entry.model.residues.items[site.residue_idx];
-            const chain = entry.model.chains.items[res.chain_idx];
             const state = recommendedState(site.kind, site.predicted_pka, 7.0);
-            try writer.writeAll("      {\"id\": {\"chain_label\": \"");
-            try writeJsonString(writer, chain.labelSlice());
-            try writer.writeAll("\", \"chain_auth\": \"");
-            try writeJsonString(writer, chain.authSlice());
-            try writer.writeAll("\", \"comp_id\": \"");
-            try writeJsonString(writer, res.compIdSlice());
-            try writer.print("\", \"seq_id\": {d}, \"auth_seq_id\": {d}, \"ins_code\": ", .{ res.seq_id, res.auth_seq_id });
-            if (res.ins_code == ' ') {
-                try writer.writeAll("null");
-            } else {
-                try writer.print("\"{c}\"", .{res.ins_code});
-            }
-            try writer.writeAll(", \"site\": \"");
-            try writer.writeAll(site.kind.name());
-            try writer.writeAll("\"}, \"state\": {\"macrostate\": \"");
+            try writer.writeAll("      {");
+            try writeSiteId(writer, entry.model, site.residue_idx, site.kind);
+            try writer.writeAll(", \"state\": {\"macrostate\": \"");
             try writer.writeAll(state.macrostate);
             try writer.writeAll("\", \"tautomer\": ");
             if (state.tautomer) |tautomer| {
@@ -262,11 +258,39 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
             if (site_i + 1 < entry.prediction.sites.len) try writer.writeAll(",");
             try writer.writeAll("\n");
         }
-        try writer.writeAll("    ]}");
+        try writer.writeAll("    ], \"excluded_sites\": [");
+        for (entry.prediction.excluded, 0..) |site, i| {
+            if (i > 0) try writer.writeAll(",");
+            try writer.writeAll("\n      {");
+            try writeSiteId(writer, entry.model, site.residue_idx, site.kind);
+            try writer.print(", \"reason\": \"{s}\"}}", .{@tagName(site.reason)});
+        }
+        if (entry.prediction.excluded.len > 0) try writer.writeAll("\n    ");
+        try writer.writeAll("]}");
         if (model_i + 1 < models.len) try writer.writeAll(",");
         try writer.writeAll("\n");
     }
     try writer.writeAll("  ]\n}\n");
+}
+
+fn writeSiteId(writer: anytype, mdl: *const model_mod.Model, residue_idx: u32, kind: pka.SiteKind) !void {
+    const res = mdl.residues.items[residue_idx];
+    const chain = mdl.chains.items[res.chain_idx];
+    try writer.writeAll("\"id\": {\"chain_label\": \"");
+    try writeJsonString(writer, chain.labelSlice());
+    try writer.writeAll("\", \"chain_auth\": \"");
+    try writeJsonString(writer, chain.authSlice());
+    try writer.writeAll("\", \"comp_id\": \"");
+    try writeJsonString(writer, res.compIdSlice());
+    try writer.print("\", \"seq_id\": {d}, \"auth_seq_id\": {d}, \"ins_code\": ", .{ res.seq_id, res.auth_seq_id });
+    if (res.ins_code == ' ') {
+        try writer.writeAll("null");
+    } else {
+        try writer.print("\"{c}\"", .{res.ins_code});
+    }
+    try writer.writeAll(", \"site\": \"");
+    try writer.writeAll(kind.name());
+    try writer.writeAll("\"}");
 }
 
 const RecommendedState = struct {

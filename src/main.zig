@@ -33,6 +33,7 @@ const PkaConfig = struct {
     output_path: ?[]const u8 = null,
     model_filter: zreduce.run.ModelFilter = .all,
     model_only: bool = false,
+    parameters_path: ?[]const u8 = null,
 };
 
 /// Fields shared between RunConfig and BatchConfig, parsed by parseCommonOption.
@@ -305,6 +306,13 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
             config.output_path = args[i];
         } else if (std.mem.eql(u8, arg, "--model-only")) {
             config.model_only = true;
+        } else if (std.mem.eql(u8, arg, "--parameters")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --parameters requires a path argument\n", .{});
+                std.process.exit(1);
+            }
+            config.parameters_path = args[i];
         } else if (std.mem.eql(u8, arg, "--model")) {
             i += 1;
             if (i >= args.len) {
@@ -376,6 +384,7 @@ fn printPkaUsage() void {
         \\    -o, --output PATH  JSON output (default: stdout)
         \\    --model VALUE      Model selection: 'all' (default) or a number
         \\    --model-only       Emit intrinsic model-pKa baseline without structure terms
+        \\    --parameters PATH  JSON parameter set (calibration/research; needs its own "version")
         \\
     , .{});
 }
@@ -778,8 +787,23 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
     };
     defer allocator.free(source);
 
-    std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{zreduce.pka.parameter_version});
+    var parsed_params: ?std.json.Parsed(zreduce.pka.Parameters) = null;
+    defer if (parsed_params) |*p| p.deinit();
+    if (config.parameters_path) |path| {
+        const json = zreduce.run.readFile(allocator, path) catch |err| {
+            std.debug.print("Error: cannot read parameters '{s}': {s}\n", .{ path, @errorName(err) });
+            std.process.exit(1);
+        };
+        defer allocator.free(json);
+        parsed_params = zreduce.pka.parseParameters(allocator, json) catch |err| {
+            std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
+            std.process.exit(1);
+        };
+    }
+    const parameters: zreduce.pka.Parameters = if (parsed_params) |p| p.value else .{};
+    std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version});
     const prediction_config = zreduce.pka.Config{
+        .parameters = parameters,
         .include_structure_terms = !config.model_only,
         .include_coupling = !config.model_only,
     };

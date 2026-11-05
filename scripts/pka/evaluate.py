@@ -21,23 +21,33 @@ REQUIRED = {
 }
 
 
+def assign_split(row: dict[str, str], seed: str, train_fraction: float) -> str:
+    """Holdout families (e.g. SNase) never enter train/test."""
+    family = row.get("holdout_family", "")
+    if family:
+        return f"stress:{family}"
+    return cluster_split(row["cluster_id"], seed, train_fraction)
+
+
 def cluster_split(cluster_id: str, seed: str, train_fraction: float) -> str:
     digest = hashlib.sha256(f"{seed}\0{cluster_id}".encode()).digest()
     fraction = int.from_bytes(digest[:8], "big") / 2**64
     return "train" if fraction < train_fraction else "test"
 
 
-def metrics(rows: list[dict[str, str]]) -> dict[str, float | int | None]:
+def metrics(
+    rows: list[dict[str, str]], predicted_key: str = "predicted_pka"
+) -> dict[str, float | int | None]:
     if not rows:
         return {"n": 0, "mae": None, "rmse": None, "shift_direction_accuracy": None}
     errors = [
-        float(row["predicted_pka"]) - float(row["experimental_pka"]) for row in rows
+        float(row[predicted_key]) - float(row["experimental_pka"]) for row in rows
     ]
     directions: list[bool] = []
     for row in rows:
         model = float(row["model_pka"])
         experimental_shift = float(row["experimental_pka"]) - model
-        predicted_shift = float(row["predicted_pka"]) - model
+        predicted_shift = float(row[predicted_key]) - model
         if abs(experimental_shift) >= 0.1:
             directions.append((experimental_shift > 0) == (predicted_shift > 0))
     return {
@@ -50,22 +60,49 @@ def metrics(rows: list[dict[str, str]]) -> dict[str, float | int | None]:
     }
 
 
+STRATA = (
+    ("residue", lambda row: row["comp_id"].upper()),
+    (
+        "exposure",
+        lambda row: "buried" if float(row["burial_fraction"]) >= 0.5 else "surface",
+    ),
+)
+
+
+def _group(rows: list[dict[str, str]], key_fn) -> dict[str, list[dict[str, str]]]:
+    groups: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        groups[key_fn(row)].append(row)
+    return groups
+
+
 def evaluate(rows: list[dict[str, str]]) -> dict[str, object]:
-    report: dict[str, object] = {"overall": metrics(rows)}
-    for dimension, key_fn in (
-        ("split", lambda row: row["split"]),
-        ("residue", lambda row: row["comp_id"].upper()),
-        (
-            "exposure",
-            lambda row: "buried" if float(row["burial_fraction"]) >= 0.5 else "surface",
-        ),
-    ):
-        groups: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for row in rows:
-            groups[key_fn(row)].append(row)
-        report[dimension] = {
-            key: metrics(value) for key, value in sorted(groups.items())
+    report: dict[str, object] = {
+        "overall": metrics(rows),
+        # Null model: intrinsic model pKa only. A structure-based predictor
+        # must beat this on held-out data to be worth applying.
+        "null_model_overall": metrics(rows, "model_pka"),
+        "null_model_split": {
+            key: metrics([row for row in rows if row["split"] == key], "model_pka")
+            for key in sorted({row["split"] for row in rows})
+        },
+    }
+    splits: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        splits[row["split"]].append(row)
+    report["split"] = {key: metrics(value) for key, value in sorted(splits.items())}
+    # Strata are reported per split so in-sample (train), held-out (test) and
+    # stress rows are never mixed in one residue or exposure number.
+    report["strata"] = {
+        key: {
+            dimension: {
+                group: metrics(members)
+                for group, members in sorted(_group(value, key_fn).items())
+            }
+            for dimension, key_fn in STRATA
         }
+        for key, value in sorted(splits.items())
+    }
     return report
 
 
@@ -83,7 +120,7 @@ def main() -> None:
             raise SystemExit(f"missing columns: {', '.join(sorted(missing))}")
         rows = list(reader)
     for row in rows:
-        assigned = cluster_split(row["cluster_id"], args.seed, args.train_fraction)
+        assigned = assign_split(row, args.seed, args.train_fraction)
         if row.get("split") and row["split"] != assigned:
             raise SystemExit(
                 f"row has split {row['split']!r}, expected cluster-derived {assigned!r}"

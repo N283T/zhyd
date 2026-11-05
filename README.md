@@ -132,6 +132,13 @@ Applied state reports and experimental pKa reports use the versioned
 validated for production charge assignment and intentionally does not expose a
 `--ph` coordinate-assignment option.
 
+The current parameter set, `zhyd-pka-protein-v0.2`, was fitted on a
+cluster-split PKAD-R training set. On held-out proteins it is slightly better
+than intrinsic model pKa values alone (MAE 0.80 vs 0.85), but it does poorly on
+deeply buried groups such as the SNase stress set. Disulfide and
+metal-coordinated residues are listed as `excluded_sites` instead of being
+predicted. See `docs/specs/zhyd-protonation-pka.md` and `scripts/pka/`.
+
 ### Mover fixes
 
 One override per line:
