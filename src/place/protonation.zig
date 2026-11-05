@@ -106,11 +106,10 @@ pub const ProtonationOverrides = struct {
 
 pub fn parseFile(allocator: std.mem.Allocator, path: []const u8) !ProtonationOverrides {
     const io = defaultIo();
-    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
-    defer file.close(io);
-    var read_buf: [4096]u8 = undefined;
-    var reader = file.reader(io, &read_buf);
-    const source = try reader.interface.readAlloc(allocator, 1024 * 1024);
+    // readAlloc on a streaming reader reports EndOfStream for ordinary short
+    // files under Zig 0.16. A bounded whole-file read has the intended
+    // semantics for this deliberately small control format.
+    const source = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
     defer allocator.free(source);
     return parseString(allocator, source);
 }

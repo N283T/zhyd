@@ -47,6 +47,7 @@ zreduce run input.cif -o output.cif --strip-h
 # Diagnostics and control files
 zreduce run input.cif -o output.cif --validate
 zreduce run input.cif -o output.cif --json log.json
+zreduce run input.cif -o output.cif --state-json protonation-state.json
 zreduce run input.cif -o output.cif --protonation protonation.txt
 zreduce run input.cif --dump-movers movers.txt --no-opt
 zreduce run input.cif -o output.cif --fix fix.txt
@@ -58,6 +59,10 @@ zreduce batch input_dir/ -j 4
 
 # Precompile a CCD dictionary
 zreduce compile-dict components.cif -o components.zccd
+
+# Experimental pKa report (does not change coordinates)
+zreduce pka input.cif -o pka.json
+zreduce pka input.cif --model-only -o model-pka-baseline.json
 ```
 
 ## Commands
@@ -65,6 +70,7 @@ zreduce compile-dict components.cif -o components.zccd
 ```text
 zreduce run [OPTIONS] <input.cif|input.pdb>
 zreduce batch [OPTIONS] <input_dir>
+zreduce pka [OPTIONS] <input.cif|input.pdb>
 zreduce compile-dict [OPTIONS] <input.cif>
 ```
 
@@ -78,6 +84,7 @@ Common `run` and `batch` options:
 | `-s, --sdf PATH` | SDF/MOL ligand topology |
 | `-o, --output PATH` | Output file or directory |
 | `--json PATH` / `--jsonl PATH` | Single-file JSON log / batch JSONL log |
+| `--state-json PATH` | Applied residue state/formal-charge sidecar (`run` only) |
 | `--protonation PATH` | Residue protonation override file |
 | `--fix PATH` | Force mover states from a control file |
 | `--no-opt` | Skip optimization |
@@ -119,6 +126,11 @@ Supported states:
 - `GLU`: `DEPROTONATED`, `OE1`, `OE2`
 - `LYS`: `CHARGED`, `NEUTRAL`
 - `CYS`: `THIOL`, `THIOLATE`
+
+Applied state reports and experimental pKa reports use the versioned
+`zhyd.protonation.v1` schema in `docs/schema/`. The pKa model is not yet
+validated for production charge assignment and intentionally does not expose a
+`--ph` coordinate-assignment option.
 
 ### Mover fixes
 

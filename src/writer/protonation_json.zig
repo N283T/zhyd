@@ -1,0 +1,322 @@
+//! Versioned machine-readable protonation and pKa report.
+
+const std = @import("std");
+const model_mod = @import("../model.zig");
+const pka = @import("../pka.zig");
+const protonation = @import("../place/protonation.zig");
+const terminal = @import("../place/terminal.zig");
+
+pub const ReportModel = struct {
+    model_num: u32,
+    model: *const model_mod.Model,
+    prediction: *const pka.Prediction,
+};
+
+pub const StateReportModel = struct {
+    model_num: u32,
+    model: *const model_mod.Model,
+};
+
+pub fn writeStateReport(
+    writer: anytype,
+    input: []const u8,
+    coordinate_file: ?[]const u8,
+    models: []const StateReportModel,
+    overrides: ?*const protonation.ProtonationOverrides,
+    nterm_mode: terminal.NtermMode,
+) !void {
+    try writer.writeAll("{\n  \"schema_version\": \"");
+    try writer.writeAll(pka.schema_version);
+    try writer.writeAll("\",\n  \"report_kind\": \"applied_protonation_state\",\n  \"status\": \"coordinate_assignment\",\n  \"input\": \"");
+    try writeJsonString(writer, input);
+    try writer.writeAll("\",\n  \"coordinate_file\": ");
+    if (coordinate_file) |path| {
+        try writer.writeAll("\"");
+        try writeJsonString(writer, path);
+        try writer.writeAll("\"");
+    } else try writer.writeAll("null");
+    try writer.writeAll(",\n  \"parameter_version\": null,\n  \"models\": [\n");
+    for (models, 0..) |entry, model_i| {
+        try writer.print("    {{\"model\": {d}, \"sites\": [\n", .{entry.model_num});
+        var first = true;
+        for (entry.model.residues.items, 0..) |res, res_idx| {
+            const comp = res.compIdSlice();
+            const kind: ?pka.SiteKind = if (std.mem.eql(u8, comp, "ASP")) .asp else if (std.mem.eql(u8, comp, "GLU")) .glu else if (std.mem.eql(u8, comp, "HIS")) .his else if (std.mem.eql(u8, comp, "LYS")) .lys else if (std.mem.eql(u8, comp, "CYS")) .cys else if (std.mem.eql(u8, comp, "TYR")) .tyr else null;
+            if (kind) |k| {
+                if (!first) try writer.writeAll(",\n");
+                first = false;
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), k, overrides, nterm_mode);
+            }
+            const chain = entry.model.chains.items[res.chain_idx];
+            const is_nterm = res_idx == chain.residue_start or
+                (res.is_chain_break_before and nterm_mode.treatsBreakAsNterm());
+            const is_cterm = res_idx == chain.residue_end - 1 or
+                (res_idx + 1 < entry.model.residues.items.len and entry.model.residues.items[res_idx + 1].is_chain_break_before);
+            if (is_nterm) {
+                if (!first) try writer.writeAll(",\n");
+                first = false;
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .n_term, overrides, nterm_mode);
+            }
+            if (is_cterm) {
+                if (!first) try writer.writeAll(",\n");
+                first = false;
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .c_term, overrides, nterm_mode);
+            }
+        }
+        try writer.writeAll("\n    ]}");
+        if (model_i + 1 < models.len) try writer.writeAll(",");
+        try writer.writeAll("\n");
+    }
+    try writer.writeAll("  ]\n}\n");
+}
+
+const AppliedState = struct {
+    macrostate: []const u8,
+    tautomer: ?[]const u8 = null,
+    charge: i8,
+    source: []const u8,
+    warning: ?[]const u8 = null,
+};
+
+fn writeAppliedSite(
+    writer: anytype,
+    mdl: *const model_mod.Model,
+    residue_idx: u32,
+    kind: pka.SiteKind,
+    overrides: ?*const protonation.ProtonationOverrides,
+    nterm_mode: terminal.NtermMode,
+) !void {
+    const res = mdl.residues.items[residue_idx];
+    const chain = mdl.chains.items[res.chain_idx];
+    const state = appliedState(mdl, residue_idx, kind, overrides, nterm_mode);
+    try writer.writeAll("      {\"id\": {\"chain_label\": \"");
+    try writeJsonString(writer, chain.labelSlice());
+    try writer.writeAll("\", \"chain_auth\": \"");
+    try writeJsonString(writer, chain.authSlice());
+    try writer.writeAll("\", \"comp_id\": \"");
+    try writeJsonString(writer, res.compIdSlice());
+    try writer.print("\", \"seq_id\": {d}, \"auth_seq_id\": {d}, \"ins_code\": ", .{ res.seq_id, res.auth_seq_id });
+    if (res.ins_code == ' ') try writer.writeAll("null") else try writer.print("\"{c}\"", .{res.ins_code});
+    try writer.writeAll(", \"site\": \"");
+    try writer.writeAll(kind.name());
+    try writer.writeAll("\"}, \"state\": {\"macrostate\": \"");
+    try writer.writeAll(state.macrostate);
+    try writer.writeAll("\", \"tautomer\": ");
+    if (state.tautomer) |value| {
+        try writer.print("\"{s}\"", .{value});
+    } else try writer.writeAll("null");
+    try writer.print(", \"formal_charge\": {d}, \"source\": \"{s}\", \"applies_to_coordinates\": true}}, \"pka\": null, \"confidence\": null, \"warnings\": [", .{ state.charge, state.source });
+    if (state.warning) |warning| try writer.print("\"{s}\"", .{warning});
+    try writer.writeAll("]}");
+}
+
+fn appliedState(
+    mdl: *const model_mod.Model,
+    residue_idx: u32,
+    kind: pka.SiteKind,
+    overrides: ?*const protonation.ProtonationOverrides,
+    nterm_mode: terminal.NtermMode,
+) AppliedState {
+    const override_state = if (overrides) |value| value.find(mdl, residue_idx) else null;
+    if (override_state) |value| switch (value) {
+        .his => |his| if (kind == .his and his != .auto) return switch (his) {
+            .hid => .{ .macrostate = "neutral", .tautomer = "HID", .charge = 0, .source = "user_override" },
+            .hie => .{ .macrostate = "neutral", .tautomer = "HIE", .charge = 0, .source = "user_override" },
+            .hip => .{ .macrostate = "protonated_cation", .tautomer = "HIP", .charge = 1, .source = "user_override" },
+            .auto => unreachable,
+        },
+        .asp => |acid| if (kind == .asp) return acidAppliedState(acid, "OD1", "OD2"),
+        .glu => |acid| if (kind == .glu) return acidAppliedState(acid, "OE1", "OE2"),
+        .lys => |lys| if (kind == .lys) return if (lys == .charged)
+            .{ .macrostate = "protonated_cation", .charge = 1, .source = "user_override" }
+        else
+            .{ .macrostate = "neutral", .charge = 0, .source = "user_override" },
+        .cys => |cys| if (kind == .cys) return if (cys == .thiol)
+            .{ .macrostate = "protonated_neutral", .charge = 0, .source = "user_override" }
+        else
+            .{ .macrostate = "deprotonated_anion", .charge = -1, .source = "user_override" },
+    };
+
+    return switch (kind) {
+        .asp, .glu => .{ .macrostate = "deprotonated_anion", .charge = -1, .source = "default" },
+        .lys => .{ .macrostate = "protonated_cation", .charge = 1, .source = "default" },
+        .cys, .tyr => .{ .macrostate = "protonated_neutral", .charge = 0, .source = "default" },
+        .his => histidineAppliedState(mdl, residue_idx),
+        .n_term => if (nterm_mode == .neutral and !std.mem.eql(u8, mdl.residues.items[residue_idx].compIdSlice(), "PRO"))
+            .{ .macrostate = "neutral", .charge = 0, .source = "user_override" }
+        else
+            .{ .macrostate = "protonated_cation", .charge = 1, .source = if (nterm_mode == .auto) "default" else "user_override" },
+        .c_term => .{ .macrostate = "deprotonated_anion", .charge = -1, .source = "default" },
+    };
+}
+
+fn acidAppliedState(state: protonation.AcidState, atom1: []const u8, atom2: []const u8) AppliedState {
+    return switch (state) {
+        .deprotonated => .{ .macrostate = "deprotonated_anion", .charge = -1, .source = "user_override" },
+        .atom1 => .{ .macrostate = "protonated_neutral", .tautomer = atom1, .charge = 0, .source = "user_override" },
+        .atom2 => .{ .macrostate = "protonated_neutral", .tautomer = atom2, .charge = 0, .source = "user_override" },
+    };
+}
+
+fn histidineAppliedState(mdl: *const model_mod.Model, residue_idx: u32) AppliedState {
+    const hd1 = hydrogenPresent(mdl, residue_idx, "HD1");
+    const he2 = hydrogenPresent(mdl, residue_idx, "HE2");
+    if (hd1 and he2) return .{ .macrostate = "protonated_cation", .tautomer = "HIP", .charge = 1, .source = "geometry_selected" };
+    if (hd1) return .{ .macrostate = "neutral", .tautomer = "HID", .charge = 0, .source = "geometry_selected" };
+    if (he2) return .{ .macrostate = "neutral", .tautomer = "HIE", .charge = 0, .source = "geometry_selected" };
+    return .{ .macrostate = "neutral", .tautomer = "UNKNOWN", .charge = 0, .source = "geometry_selected", .warning = "histidine_tautomer_not_observable_from_hydrogens" };
+}
+
+fn hydrogenPresent(mdl: *const model_mod.Model, residue_idx: u32, name: []const u8) bool {
+    for (mdl.atoms.items) |atom| {
+        if (atom.residue_idx != residue_idx or !atom.is_hydrogen) continue;
+        if (!std.mem.eql(u8, atom.nameSlice(), name)) continue;
+        if (atom.pos.x > 999 and atom.pos.y > 999 and atom.pos.z > 999) continue;
+        return true;
+    }
+    return false;
+}
+
+pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const ReportModel) !void {
+    try writer.writeAll("{\n  \"schema_version\": \"");
+    try writeJsonString(writer, pka.schema_version);
+    try writer.writeAll("\",\n  \"report_kind\": \"pka_prediction\",\n");
+    try writer.writeAll("  \"status\": \"experimental_unvalidated\",\n");
+    try writer.writeAll("  \"input\": \"");
+    try writeJsonString(writer, input);
+    try writer.writeAll("\",\n  \"parameter_version\": \"");
+    try writeJsonString(writer, pka.parameter_version);
+    try writer.writeAll("\",\n  \"reference_ph_for_recommended_state\": 7.0,\n");
+    try writer.writeAll("  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"protein_v0.1_requires_external_validation\"],\n");
+    try writer.writeAll("  \"models\": [\n");
+
+    for (models, 0..) |entry, model_i| {
+        try writer.print("    {{\"model\": {d}, \"omitted_sites\": {d}, \"sites\": [\n", .{ entry.model_num, entry.prediction.omitted_sites });
+        for (entry.prediction.sites, 0..) |site, site_i| {
+            const res = entry.model.residues.items[site.residue_idx];
+            const chain = entry.model.chains.items[res.chain_idx];
+            const state = recommendedState(site.kind, site.predicted_pka, 7.0);
+            try writer.writeAll("      {\"id\": {\"chain_label\": \"");
+            try writeJsonString(writer, chain.labelSlice());
+            try writer.writeAll("\", \"chain_auth\": \"");
+            try writeJsonString(writer, chain.authSlice());
+            try writer.writeAll("\", \"comp_id\": \"");
+            try writeJsonString(writer, res.compIdSlice());
+            try writer.print("\", \"seq_id\": {d}, \"auth_seq_id\": {d}, \"ins_code\": ", .{ res.seq_id, res.auth_seq_id });
+            if (res.ins_code == ' ') {
+                try writer.writeAll("null");
+            } else {
+                try writer.print("\"{c}\"", .{res.ins_code});
+            }
+            try writer.writeAll(", \"site\": \"");
+            try writer.writeAll(site.kind.name());
+            try writer.writeAll("\"}, \"state\": {\"macrostate\": \"");
+            try writer.writeAll(state.macrostate);
+            try writer.writeAll("\", \"tautomer\": ");
+            if (state.tautomer) |tautomer| {
+                try writer.writeAll("\"");
+                try writer.writeAll(tautomer);
+                try writer.writeAll("\"");
+            } else try writer.writeAll("null");
+            try writer.print(", \"formal_charge\": {d}, \"source\": \"pka_predicted\", \"applies_to_coordinates\": false}}, ", .{state.formal_charge});
+            try writer.print("\"pka\": {{\"predicted\": {d:.4}, \"terms\": {{\"model\": {d:.4}, \"burial\": {d:.4}, \"hydrogen_bond\": {d:.4}, \"electrostatic\": {d:.4}, \"coupling\": {d:.4}}}, \"burial_fraction\": {d:.4}}}, ", .{
+                site.predicted_pka,
+                site.terms.model,
+                site.terms.burial,
+                site.terms.hydrogen_bond,
+                site.terms.electrostatic,
+                site.terms.coupling,
+                site.burial_fraction,
+            });
+            try writer.writeAll("\"confidence\": \"");
+            try writer.writeAll(@tagName(site.confidence));
+            try writer.writeAll("\", \"warnings\": [");
+            var wrote_warning = false;
+            if (site.coupled) {
+                try writer.writeAll("\"coupled_group_mean_field_approximation\"");
+                wrote_warning = true;
+            }
+            if (site.kind == .his and state.formal_charge == 0) {
+                if (wrote_warning) try writer.writeAll(", ");
+                try writer.writeAll("\"neutral_histidine_tautomer_requires_geometry_selection\"");
+                wrote_warning = true;
+            }
+            if (site.confidence == .low) {
+                if (wrote_warning) try writer.writeAll(", ");
+                try writer.writeAll("\"low_confidence_environment\"");
+            }
+            try writer.writeAll("]}");
+            if (site_i + 1 < entry.prediction.sites.len) try writer.writeAll(",");
+            try writer.writeAll("\n");
+        }
+        try writer.writeAll("    ]}");
+        if (model_i + 1 < models.len) try writer.writeAll(",");
+        try writer.writeAll("\n");
+    }
+    try writer.writeAll("  ]\n}\n");
+}
+
+const RecommendedState = struct {
+    macrostate: []const u8,
+    tautomer: ?[]const u8,
+    formal_charge: i8,
+};
+
+fn recommendedState(kind: pka.SiteKind, predicted_pka: f32, ph: f32) RecommendedState {
+    const protonated = predicted_pka >= ph;
+    if (kind.isAcid()) {
+        return if (protonated)
+            .{ .macrostate = "protonated_neutral", .tautomer = if (kind == .asp or kind == .glu) "unspecified_carboxyl_oxygen" else null, .formal_charge = 0 }
+        else
+            .{ .macrostate = "deprotonated_anion", .tautomer = null, .formal_charge = -1 };
+    }
+    if (protonated) {
+        return .{ .macrostate = "protonated_cation", .tautomer = if (kind == .his) "HIP" else null, .formal_charge = 1 };
+    }
+    return .{ .macrostate = "neutral", .tautomer = if (kind == .his) "HID_OR_HIE" else null, .formal_charge = 0 };
+}
+
+fn writeJsonString(writer: anytype, value: []const u8) !void {
+    for (value) |c| switch (c) {
+        '"' => try writer.writeAll("\\\""),
+        '\\' => try writer.writeAll("\\\\"),
+        '\n' => try writer.writeAll("\\n"),
+        '\r' => try writer.writeAll("\\r"),
+        '\t' => try writer.writeAll("\\t"),
+        else => if (c < 0x20) try writer.print("\\u{x:0>4}", .{c}) else try writer.writeByte(c),
+    };
+}
+
+const testing = std.testing;
+
+test "prediction report escapes input and carries stable schema" {
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try writePredictionReport(&out.writer, "a\"b.cif", &.{});
+    const json = out.writer.buffered();
+    try testing.expect(std.mem.find(u8, json, "zhyd.protonation.v1") != null);
+    try testing.expect(std.mem.find(u8, json, "a\\\"b.cif") != null);
+}
+
+test "applied state report records geometry-selected histidine tautomer" {
+    var mdl = model_mod.Model.init(testing.allocator);
+    defer mdl.deinit();
+    var chain = model_mod.Chain{};
+    chain.setLabelAsymId("A");
+    chain.setAuthAsymId("A");
+    chain.residue_end = 1;
+    try mdl.chains.append(testing.allocator, chain);
+    var res = model_mod.Residue{ .chain_idx = 0, .seq_id = 1, .auth_seq_id = 1, .atom_end = 1, .entity_type = .polymer };
+    res.setCompId("HIS");
+    try mdl.residues.append(testing.allocator, res);
+    var hd1 = model_mod.Atom{ .pos = .{ .x = 1, .y = 2, .z = 3 }, .residue_idx = 0, .is_hydrogen = true };
+    hd1.setName("HD1");
+    try mdl.atoms.append(testing.allocator, hd1);
+    const reports = [_]StateReportModel{.{ .model_num = 1, .model = &mdl }};
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try writeStateReport(&out.writer, "his.cif", "his-out.cif", &reports, null, .auto);
+    const json = out.writer.buffered();
+    try testing.expect(std.mem.find(u8, json, "\"tautomer\": \"HID\"") != null);
+    try testing.expect(std.mem.find(u8, json, "\"source\": \"geometry_selected\"") != null);
+}

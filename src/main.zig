@@ -14,6 +14,7 @@ const RunConfig = struct {
     dict_path: ?[]const u8 = null,
     sdf_path: ?[]const u8 = null,
     json_path: ?[]const u8 = null,
+    state_json_path: ?[]const u8 = null,
     no_opt: bool = false,
     no_flip: bool = false,
     validate: bool = false,
@@ -25,6 +26,13 @@ const RunConfig = struct {
     dump_movers_path: ?[]const u8 = null,
     strip_h: bool = false,
     model_filter: zreduce.run.ModelFilter = .all,
+};
+
+const PkaConfig = struct {
+    input_path: []const u8,
+    output_path: ?[]const u8 = null,
+    model_filter: zreduce.run.ModelFilter = .all,
+    model_only: bool = false,
 };
 
 /// Fields shared between RunConfig and BatchConfig, parsed by parseCommonOption.
@@ -228,6 +236,13 @@ fn parseRunArgs(args: []const []const u8) ?RunConfig {
                 std.process.exit(1);
             }
             config.json_path = args[i];
+        } else if (std.mem.eql(u8, arg, "--state-json")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --state-json requires a path argument\n", .{});
+                std.process.exit(1);
+            }
+            config.state_json_path = args[i];
         } else if (std.mem.eql(u8, arg, "--dump-movers")) {
             i += 1;
             if (i >= args.len) {
@@ -272,6 +287,59 @@ fn parseRunArgs(args: []const []const u8) ?RunConfig {
     return config;
 }
 
+fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
+    var config = PkaConfig{ .input_path = undefined };
+    var input_set = false;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            printPkaUsage();
+            return null;
+        } else if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: {s} requires a path argument\n", .{arg});
+                std.process.exit(1);
+            }
+            config.output_path = args[i];
+        } else if (std.mem.eql(u8, arg, "--model-only")) {
+            config.model_only = true;
+        } else if (std.mem.eql(u8, arg, "--model")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --model requires 'all' or a model number\n", .{});
+                std.process.exit(1);
+            }
+            if (std.ascii.eqlIgnoreCase(args[i], "all")) {
+                config.model_filter = .all;
+            } else {
+                const num = std.fmt.parseInt(u32, args[i], 10) catch {
+                    std.debug.print("Error: invalid --model value '{s}'\n", .{args[i]});
+                    std.process.exit(1);
+                };
+                config.model_filter = .{ .specific = num };
+            }
+        } else if (arg.len > 0 and arg[0] == '-') {
+            std.debug.print("Error: unknown option '{s}'\n", .{arg});
+            std.process.exit(1);
+        } else {
+            if (input_set) {
+                std.debug.print("Error: unexpected positional argument '{s}'\n", .{arg});
+                std.process.exit(1);
+            }
+            config.input_path = arg;
+            input_set = true;
+        }
+    }
+    if (!input_set) {
+        std.debug.print("Error: missing input file\n", .{});
+        printPkaUsage();
+        std.process.exit(1);
+    }
+    return config;
+}
+
 fn printUsage(program_name: []const u8) void {
     std.debug.print(
         \\zreduce {s} - Hydrogen placement for mmCIF/PDB structures
@@ -282,6 +350,7 @@ fn printUsage(program_name: []const u8) void {
         \\COMMANDS:
         \\    run           Process a single mmCIF or PDB file
         \\    batch         Process all mmCIF/PDB files in a directory
+        \\    pka           Experimental pKa prediction report (does not alter coordinates)
         \\    compile-dict  Pre-compile CCD dictionary to binary format
         \\
         \\GLOBAL OPTIONS:
@@ -291,6 +360,24 @@ fn printUsage(program_name: []const u8) void {
         \\Use '{s} <command> --help' for more information.
         \\
     , .{ build_options.version, program_name, program_name });
+}
+
+fn printPkaUsage() void {
+    std.debug.print(
+        \\USAGE:
+        \\    zreduce pka [OPTIONS] <input.cif|input.pdb>
+        \\
+        \\EXPERIMENTAL:
+        \\    Predict pKa values and write a versioned JSON report. This command
+        \\    does not alter coordinates or claim validated charge assignment.
+        \\
+        \\OPTIONS:
+        \\    -h, --help         Show this help message
+        \\    -o, --output PATH  JSON output (default: stdout)
+        \\    --model VALUE      Model selection: 'all' (default) or a number
+        \\    --model-only       Emit intrinsic model-pKa baseline without structure terms
+        \\
+    , .{});
 }
 
 fn printRunUsage() void {
@@ -304,6 +391,7 @@ fn printRunUsage() void {
         \\    -s, --sdf PATH     SDF/MOL file with ligand topology (for non-CCD compounds)
         \\    -o, --output PATH  Output file (default: stdout)
         \\    --json PATH        Write JSON log to file
+        \\    --state-json PATH  Write versioned applied protonation/formal-charge report
         \\    --protonation PATH  Residue protonation override file
         \\    --fix PATH         Force mover states from control file
         \\    --dump-movers PATH  Write available mover IDs/states to file
@@ -356,6 +444,8 @@ pub fn main(init: std.process.Init) !void {
         runSubcommand(allocator, args[2..]);
     } else if (std.mem.eql(u8, subcmd, "batch")) {
         batchSubcommand(allocator, args[2..]);
+    } else if (std.mem.eql(u8, subcmd, "pka")) {
+        pkaSubcommand(allocator, args[2..]);
     } else if (std.mem.eql(u8, subcmd, "compile-dict")) {
         compileDictSubcommand(allocator, args[2..]);
     } else {
@@ -637,6 +727,7 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
         .dict = if (ccd_dict) |*d| d else null,
         .sdf_dict = if (sdf_dict) |*d| d else null,
         .json_path = config.json_path,
+        .state_json_path = config.state_json_path,
         .json_version = build_options.version,
         .no_opt = config.no_opt,
         .no_flip = config.no_flip,
@@ -676,5 +767,106 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     }
     if (result.n_skipped_missing_ref > 0) {
         std.debug.print("  warning: {d} H skipped due to missing reference atoms (potential plan bug)\n", .{result.n_skipped_missing_ref});
+    }
+}
+
+fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
+    const config = parsePkaArgs(args) orelse return;
+    const source = zreduce.run.readFile(allocator, config.input_path) catch |err| {
+        std.debug.print("Error: cannot read input '{s}': {s}\n", .{ config.input_path, @errorName(err) });
+        std.process.exit(1);
+    };
+    defer allocator.free(source);
+
+    std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{zreduce.pka.parameter_version});
+    const prediction_config = zreduce.pka.Config{
+        .include_structure_terms = !config.model_only,
+        .include_coupling = !config.model_only,
+    };
+    const io = defaultIo();
+    var out_buf: [4096]u8 = undefined;
+
+    if (zreduce.run.detectFormat(config.input_path) == .mmcif) {
+        var entries = zreduce.mmcif.parseModels(allocator, source, config.model_filter) catch |err| {
+            std.debug.print("Error: failed to parse mmCIF: {s}\n", .{@errorName(err)});
+            std.process.exit(1);
+        };
+        defer {
+            for (entries.items) |*entry| entry.model.deinit();
+            entries.deinit(allocator);
+        }
+        if (entries.items.len == 0) {
+            std.debug.print("Error: no matching models\n", .{});
+            std.process.exit(1);
+        }
+        const predictions = allocator.alloc(zreduce.pka.Prediction, entries.items.len) catch @panic("out of memory");
+        defer allocator.free(predictions);
+        var predicted: usize = 0;
+        defer for (predictions[0..predicted]) |*prediction| prediction.deinit();
+        const reports = allocator.alloc(zreduce.writer.protonation_json.ReportModel, entries.items.len) catch @panic("out of memory");
+        defer allocator.free(reports);
+        for (entries.items, 0..) |*entry, i| {
+            zreduce.place.applyChemistry(&entry.model);
+            predictions[i] = zreduce.pka.predict(allocator, &entry.model, prediction_config) catch |err| {
+                std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
+                std.process.exit(1);
+            };
+            predicted += 1;
+            reports[i] = .{ .model_num = entry.model_num, .model = &entry.model, .prediction = &predictions[i] };
+        }
+        writePkaReport(io, &out_buf, config.output_path, config.input_path, reports) catch |err| {
+            std.debug.print("Error: failed to write pKa report: {s}\n", .{@errorName(err)});
+            std.process.exit(1);
+        };
+    } else {
+        var parsed = zreduce.pdb.parseAll(allocator, source, config.model_filter) catch |err| {
+            std.debug.print("Error: failed to parse PDB: {s}\n", .{@errorName(err)});
+            std.process.exit(1);
+        };
+        defer parsed.deinit(allocator);
+        if (parsed.entries.items.len == 0) {
+            std.debug.print("Error: no matching models\n", .{});
+            std.process.exit(1);
+        }
+        const predictions = allocator.alloc(zreduce.pka.Prediction, parsed.entries.items.len) catch @panic("out of memory");
+        defer allocator.free(predictions);
+        var predicted: usize = 0;
+        defer for (predictions[0..predicted]) |*prediction| prediction.deinit();
+        const reports = allocator.alloc(zreduce.writer.protonation_json.ReportModel, parsed.entries.items.len) catch @panic("out of memory");
+        defer allocator.free(reports);
+        for (parsed.entries.items, 0..) |*entry, i| {
+            zreduce.place.applyChemistry(&entry.model);
+            predictions[i] = zreduce.pka.predict(allocator, &entry.model, prediction_config) catch |err| {
+                std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
+                std.process.exit(1);
+            };
+            predicted += 1;
+            reports[i] = .{ .model_num = entry.model_num, .model = &entry.model, .prediction = &predictions[i] };
+        }
+        writePkaReport(io, &out_buf, config.output_path, config.input_path, reports) catch |err| {
+            std.debug.print("Error: failed to write pKa report: {s}\n", .{@errorName(err)});
+            std.process.exit(1);
+        };
+    }
+}
+
+fn writePkaReport(
+    io: std.Io,
+    buffer: []u8,
+    output_path: ?[]const u8,
+    input_path: []const u8,
+    reports: []const zreduce.writer.protonation_json.ReportModel,
+) !void {
+    if (output_path) |path| {
+        const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+        defer file.close(io);
+        var fw = file.writer(io, buffer);
+        try zreduce.writer.protonation_json.writePredictionReport(&fw.interface, input_path, reports);
+        try fw.interface.flush();
+    } else {
+        const stdout = std.Io.File.stdout();
+        var sw = stdout.writer(io, buffer);
+        try zreduce.writer.protonation_json.writePredictionReport(&sw.interface, input_path, reports);
+        try sw.interface.flush();
     }
 }

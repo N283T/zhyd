@@ -11,6 +11,7 @@ pub const ccd = @import("ccd.zig");
 pub const ccd_binary = @import("ccd_binary.zig");
 pub const sdf = @import("sdf.zig");
 pub const optimize = @import("optimize/optimize.zig");
+pub const pka = @import("pka.zig");
 pub const writer = @import("writer.zig");
 pub const validate = @import("validate.zig");
 pub const gzip = @import("gzip.zig");

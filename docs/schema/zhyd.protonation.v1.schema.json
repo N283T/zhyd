@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:zhyd:schema:protonation:v1",
+  "title": "zhyd protonation and pKa interchange report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_kind", "status", "input", "parameter_version", "models"],
+  "properties": {
+    "schema_version": {"const": "zhyd.protonation.v1"},
+    "report_kind": {"enum": ["pka_prediction", "applied_protonation_state"]},
+    "status": {"type": "string"},
+    "input": {"type": "string"},
+    "coordinate_file": {"type": ["string", "null"]},
+    "parameter_version": {"type": ["string", "null"]},
+    "reference_ph_for_recommended_state": {"type": "number"},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["model", "sites"],
+        "properties": {
+          "model": {"type": "integer", "minimum": 1},
+          "omitted_sites": {"type": "integer", "minimum": 0},
+          "sites": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "state", "pka", "confidence", "warnings"],
+              "properties": {
+                "id": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["chain_label", "chain_auth", "comp_id", "seq_id", "auth_seq_id", "ins_code", "site"],
+                  "properties": {
+                    "chain_label": {"type": "string"},
+                    "chain_auth": {"type": "string"},
+                    "comp_id": {"type": "string"},
+                    "seq_id": {"type": "integer"},
+                    "auth_seq_id": {"type": "integer"},
+                    "ins_code": {"type": ["string", "null"], "maxLength": 1},
+                    "site": {"enum": ["ASP", "GLU", "HIS", "LYS", "CYS", "TYR", "N_TERM", "C_TERM"]}
+                  }
+                },
+                "state": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["macrostate", "tautomer", "formal_charge", "source", "applies_to_coordinates"],
+                  "properties": {
+                    "macrostate": {"type": "string"},
+                    "tautomer": {"type": ["string", "null"]},
+                    "formal_charge": {"type": "integer"},
+                    "source": {"enum": ["default", "geometry_selected", "user_override", "pka_predicted"]},
+                    "applies_to_coordinates": {"type": "boolean"}
+                  }
+                },
+                "pka": {
+                  "type": ["object", "null"],
+                  "required": ["predicted", "terms", "burial_fraction"],
+                  "properties": {
+                    "predicted": {"type": "number"},
+                    "burial_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+                    "terms": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["model", "burial", "hydrogen_bond", "electrostatic", "coupling"],
+                      "properties": {
+                        "model": {"type": "number"},
+                        "burial": {"type": "number"},
+                        "hydrogen_bond": {"type": "number"},
+                        "electrostatic": {"type": "number"},
+                        "coupling": {"type": "number"}
+                      }
+                    }
+                  }
+                },
+                "confidence": {"enum": ["high", "medium", "low", null]},
+                "warnings": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

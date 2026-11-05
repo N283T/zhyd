@@ -14,6 +14,7 @@ pub const ProcessConfig = struct {
     dict: ?*const zreduce.ccd.ComponentDict = null, // shared read-only; caller owns lifetime
     sdf_dict: ?*const zreduce.ccd.ComponentDict = null, // SDF-derived topology; caller owns lifetime
     json_path: ?[]const u8 = null,
+    state_json_path: ?[]const u8 = null,
     json_version: []const u8 = "", // version string for JSON log (passed from main)
     no_opt: bool = false,
     no_flip: bool = false,
@@ -441,6 +442,20 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
         try jw.interface.flush();
     }
 
+    if (config.state_json_path) |state_path| {
+        const reports = try allocator.alloc(zreduce.writer.protonation_json.StateReportModel, entries.items.len);
+        defer allocator.free(reports);
+        for (entries.items, 0..) |*entry, i| reports[i] = .{ .model_num = entry.model_num, .model = &entry.model };
+        try writeStateReportFile(
+            state_path,
+            config.input_path,
+            config.output_path,
+            reports,
+            if (protonation_overrides) |*ov| ov else null,
+            config.nterm_mode,
+        );
+    }
+
     return result;
 }
 
@@ -561,7 +576,38 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
         try jw.interface.flush();
     }
 
+    if (config.state_json_path) |state_path| {
+        const reports = try allocator.alloc(zreduce.writer.protonation_json.StateReportModel, pdb_result.entries.items.len);
+        defer allocator.free(reports);
+        for (pdb_result.entries.items, 0..) |*entry, i| reports[i] = .{ .model_num = entry.model_num, .model = &entry.model };
+        try writeStateReportFile(
+            state_path,
+            config.input_path,
+            config.output_path,
+            reports,
+            if (protonation_overrides) |*ov| ov else null,
+            config.nterm_mode,
+        );
+    }
+
     return result;
+}
+
+fn writeStateReportFile(
+    path: []const u8,
+    input_path: []const u8,
+    coordinate_path: ?[]const u8,
+    reports: []const zreduce.writer.protonation_json.StateReportModel,
+    overrides: ?*const zreduce.place.ProtonationOverrides,
+    nterm_mode: zreduce.place.NtermMode,
+) !void {
+    const io = defaultIo();
+    var buffer: [4096]u8 = undefined;
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var fw = file.writer(io, &buffer);
+    try zreduce.writer.protonation_json.writeStateReport(&fw.interface, input_path, coordinate_path, reports, overrides, nterm_mode);
+    try fw.interface.flush();
 }
 
 // ---------------------------------------------------------------------------
