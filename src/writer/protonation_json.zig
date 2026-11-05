@@ -118,6 +118,19 @@ fn appliedState(
     nterm_mode: terminal.NtermMode,
 ) AppliedState {
     const override_state = if (overrides) |value| value.find(mdl, residue_idx) else null;
+
+    // Cystine sulfur has no titratable proton; a thiol/thiolate override
+    // cannot apply and is reported rather than silently honored.
+    if (kind == .cys and pka.isCovalentlyBondedCys(mdl, residue_idx)) {
+        const overridden = if (override_state) |value| value == .cys else false;
+        return .{
+            .macrostate = "disulfide_bonded",
+            .charge = 0,
+            .source = "covalent_bond",
+            .warning = if (overridden) "override_ignored_covalent_bond" else null,
+        };
+    }
+
     if (override_state) |value| switch (value) {
         .his => |his| if (kind == .his and his != .auto) return switch (his) {
             .hid => .{ .macrostate = "neutral", .tautomer = "HID", .charge = 0, .source = "user_override" },
@@ -319,4 +332,17 @@ test "applied state report records geometry-selected histidine tautomer" {
     const json = out.writer.buffered();
     try testing.expect(std.mem.find(u8, json, "\"tautomer\": \"HID\"") != null);
     try testing.expect(std.mem.find(u8, json, "\"source\": \"geometry_selected\"") != null);
+}
+
+test "applied state report marks disulfide cysteines as covalently bonded" {
+    const mmcif = @import("../mmcif.zig");
+    var mdl = try mmcif.parseModel(testing.allocator, @embedFile("../test_data/disulfide.cif"));
+    defer mdl.deinit();
+    const reports = [_]StateReportModel{.{ .model_num = 1, .model = &mdl }};
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try writeStateReport(&out.writer, "disulfide.cif", null, &reports, null, .auto);
+    const json = out.writer.buffered();
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, json, "\"macrostate\": \"disulfide_bonded\""));
+    try testing.expect(std.mem.find(u8, json, "\"protonated_neutral\"") == null);
 }

@@ -106,6 +106,10 @@ versioned parameter family; none are silently approximated as protein residues.
 - `applied_protonation_state`, produced by `run --state-json`, records the state
   that actually controls coordinates, charge, and provenance and links the
   companion H-containing structure through `coordinate_file`. Its pKa is null.
+  Disulfide-bonded cysteines (flagged by `_struct_conn` or SG–SG ≤ 2.5 Å) are
+  reported as `disulfide_bonded` with source `covalent_bond`; a CYS override on
+  such a residue is ignored with the `override_ignored_covalent_bond` warning.
+  The `pka` command does not treat them as titratable sites.
 - `pka_prediction`, produced by `pka`, records each correction term, predicted
   state/charge at reference pH, confidence, and warnings. It explicitly says
   the state does not apply to coordinates.

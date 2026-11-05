@@ -139,7 +139,10 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, config: Config) 
         if (res.entity_type != .polymer and !isStandardAminoAcid(comp_id)) continue;
         const kind: ?SiteKind = if (std.mem.eql(u8, comp_id, "ASP")) .asp else if (std.mem.eql(u8, comp_id, "GLU")) .glu else if (std.mem.eql(u8, comp_id, "HIS")) .his else if (std.mem.eql(u8, comp_id, "LYS")) .lys else if (std.mem.eql(u8, comp_id, "CYS")) .cys else if (std.mem.eql(u8, comp_id, "TYR")) .tyr else null;
         if (kind) |k| {
-            if (siteCenter(mdl, @intCast(res_idx), k)) |center| {
+            // A cystine SG has no titratable proton; it is not a site.
+            if (k == .cys and isCovalentlyBondedCys(mdl, @intCast(res_idx))) {
+                // fall through to terminus handling below
+            } else if (siteCenter(mdl, @intCast(res_idx), k)) |center| {
                 try candidates.append(allocator, .{ .residue_idx = @intCast(res_idx), .kind = k, .center = center });
             } else omitted += 1;
         }
@@ -208,6 +211,30 @@ fn siteCenter(mdl: *const Model, residue_idx: u32, kind: SiteKind) ?Vec3f32 {
         .n_term => namedAtom(mdl, residue_idx, "N"),
         .c_term => namedAtom(mdl, residue_idx, "OXT") orelse namedAtom(mdl, residue_idx, "O"),
     };
+}
+
+/// Maximum SG–SG distance treated as a disulfide bond (typical 2.03–2.05 Å).
+const disulfide_max_distance: f32 = 2.5;
+
+/// True when the CYS side-chain sulfur is covalently bonded to another residue:
+/// either flagged from `_struct_conn`, or within disulfide distance of another
+/// CYS SG. The geometric check covers PDB input and files without
+/// `_struct_conn`.
+pub fn isCovalentlyBondedCys(mdl: *const Model, residue_idx: u32) bool {
+    const res = mdl.residues.items[residue_idx];
+    var sg: ?Vec3f32 = null;
+    for (mdl.atoms.items[res.atom_start..res.atom_end]) |atom| {
+        if (atom.is_hydrogen or !std.mem.eql(u8, atom.nameSlice(), "SG")) continue;
+        if (atom.flags.bonded_inter_residue) return true;
+        if (atom.altloc == ' ' or atom.altloc == 'A') sg = atom.pos;
+    }
+    const pos = sg orelse return false;
+    for (mdl.residues.items, 0..) |other, other_idx| {
+        if (other_idx == residue_idx or !std.mem.eql(u8, other.compIdSlice(), "CYS")) continue;
+        const other_sg = namedAtom(mdl, @intCast(other_idx), "SG") orelse continue;
+        if (pos.distance(other_sg) <= disulfide_max_distance) return true;
+    }
+    return false;
 }
 
 fn namedAtom(mdl: *const Model, residue_idx: u32, name: []const u8) ?Vec3f32 {
@@ -348,6 +375,33 @@ test "model pKa stage is deterministic and structure-independent" {
 test "mean-field charge has correct acid and base limits" {
     try testing.expect(meanChargeAtPh(.asp, 4.0, 8.0) < -0.99);
     try testing.expect(meanChargeAtPh(.lys, 10.5, 7.0) > 0.99);
+}
+
+test "disulfide-bonded cysteines are not titratable sites" {
+    const source = @embedFile("test_data/disulfide.cif");
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    var result = try predict(testing.allocator, &mdl, .{});
+    defer result.deinit();
+    for (result.sites) |site| try testing.expect(site.kind != .cys);
+    try testing.expectEqual(@as(u32, 0), result.omitted_sites);
+}
+
+test "free cysteine remains a titratable site" {
+    const source = @embedFile("test_data/disulfide.cif");
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    // Move the second SG out of bonding range.
+    for (mdl.atoms.items) |*atom| {
+        if (atom.residue_idx == 1 and std.mem.eql(u8, atom.nameSlice(), "SG")) atom.pos.x += 5.0;
+    }
+    var result = try predict(testing.allocator, &mdl, .{});
+    defer result.deinit();
+    var n_cys: usize = 0;
+    for (result.sites) |site| {
+        if (site.kind == .cys) n_cys += 1;
+    }
+    try testing.expectEqual(@as(usize, 2), n_cys);
 }
 
 test "missing required side-chain atoms are omitted explicitly" {

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   model, burial, hydrogen-bond, electrostatic, and mean-field coupling terms
 - Versioned `zhyd.protonation.v1` JSON schema and `run --state-json` sidecar for
   applied residue states, formal charges, and provenance
+  - Disulfide-bonded cysteines are excluded from pKa sites and reported as
+    `disulfide_bonded` (source `covalent_bond`) in the state report
 - External PROPKA oracle and cluster-split PKAD-R evaluation harness under
   `scripts/pka/`
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)
