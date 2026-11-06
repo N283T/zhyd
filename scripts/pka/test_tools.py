@@ -1,7 +1,9 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
+import compare_engines
 import compare_propka
 import evaluate
 import pkadr
@@ -96,6 +98,48 @@ class PkadrTests(unittest.TestCase):
         rows, _ = pkadr.normalize([record(1, "3BDC", name="SNase")])
         row = {**rows[0], "model_pka": "4", "predicted_pka": "4"}
         self.assertEqual(evaluate.assign_split(row, "seed", 0.8), "stress:snase")
+
+    def test_compare_engines_reports_term_deltas_and_missing_sites(self):
+        def site(seq, predicted, burial):
+            return {
+                "id": {
+                    "chain_auth": "A",
+                    "auth_seq_id": seq,
+                    "ins_code": None,
+                    "site": "ASP",
+                },
+                "pka": {
+                    "predicted": predicted,
+                    "terms": {
+                        "model": 3.8,
+                        "burial": burial,
+                        "hydrogen_bond": 0.0,
+                        "electrostatic": 0.0,
+                    },
+                },
+            }
+
+        oracle = {
+            "models": [{"model": 1, "sites": [site(1, 4.0, 0.2), site(2, 3.0, 0.0)]}]
+        }
+        candidate = {"models": [{"model": 1, "sites": [site(1, 4.05, 0.25)]}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for name, report in (("o.json", oracle), ("c.json", candidate)):
+                path = Path(tmp) / name
+                path.write_text(json.dumps(report))
+                paths.append(path)
+            rows, only_oracle, only_candidate = compare_engines.compare(
+                compare_engines.load_sites(paths[0]),
+                compare_engines.load_sites(paths[1]),
+            )
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["delta"], 0.05)
+        self.assertAlmostEqual(rows[0]["delta_burial"], 0.05)
+        self.assertEqual(only_oracle, [(1, "A", 2, "", "ASP")])
+        self.assertEqual(only_candidate, [])
+        ok, _ = compare_engines.summarize(rows, 0.02, 0.1, 0.99)
+        self.assertFalse(ok)
 
 
 if __name__ == "__main__":

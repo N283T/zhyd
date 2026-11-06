@@ -46,7 +46,10 @@ Plan for the built-in engine: describe PROPKA's method as a specification
 (equations, conditions, parameters cited to the papers, not code), write an
 MIT implementation from that specification, and use zpropka as a test oracle
 only. Improvements (metals, covalent cysteines, altloc ensembles,
-recalibration) go into the MIT engine.
+recalibration) go into the MIT engine. The specification, clean-room
+protocol, parity quirks and acceptance gates are in
+[zhyd-pka-empirical-engine.md](zhyd-pka-empirical-engine.md);
+`scripts/pka/compare_engines.py` checks parity against the oracle.
 
 The built-in engine is based on scientific concepts described by the primary
 papers, especially continuous burial/desolvation, hydrogen bonds,

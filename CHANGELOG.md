@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Values outside -5..20 are kept but flagged `pka_outside_physical_range`
 - External PROPKA oracle and cluster-split PKAD-R evaluation harness under
   `scripts/pka/`
+- Specification for an MIT empirical pKa engine that reproduces the PROPKA 3
+  protein model from a written description (clean-room protocol, parity
+  quirks, acceptance gates): `docs/specs/zhyd-pka-empirical-engine.md`;
+  `scripts/pka/compare_engines.py` compares two zhyd pKa reports site by site
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)
   - `-s, --sdf PATH` flag on `run` and `batch` subcommands
   - Multiple molecules per file (separated by `$$$$`), molecule name used as comp_id

@@ -16,6 +16,22 @@ python3 scripts/pka/compare_propka.py --zhyd predictions/1abc.json --propka orac
 The harness invokes the executable as a subprocess and parses only its public
 output. No PROPKA source or parameters are imported.
 
+## Engine parity (zhyd reports)
+
+Compare two `zreduce pka` reports on the same input, e.g. the zpropka oracle
+against the empirical engine
+([spec](../../docs/specs/zhyd-pka-empirical-engine.md)):
+
+```sh
+zreduce pka 1abc.cif --engine propka --propka-keep-waters -o oracle/1abc.json
+zreduce pka 1abc.cif --engine empirical -o candidate/1abc.json
+python3 scripts/pka/compare_engines.py --oracle oracle/1abc.json --candidate candidate/1abc.json -o parity/1abc.csv
+```
+
+It prints the share of sites within `--tolerance` (default 0.02), the largest
+difference in the predicted value and in each term, and sites present in only
+one report; the exit status is 1 when the parity gate fails.
+
 ## Experimental evaluation (PKAD-R)
 
 Do not commit redistributed PKAD-R data. Download the standalone JSON file
