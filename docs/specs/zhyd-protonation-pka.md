@@ -1,8 +1,10 @@
 # zhyd protonation and pKa architecture
 
-Status: two pKa engines. PROPKA 3.5.1 via the optional zpropka port
-(reference method, reproduces `propka3`), and the experimental built-in model
-(`zhyd-pka-protein-v0.2`, fitted, not accepted for production). Schema v1.
+Status: three pKa engines. PROPKA 3.5.1 via the optional zpropka port
+(reference method, reproduces `propka3`), the experimental MIT empirical
+engine (parity mode, `zhyd-empirical-v1-parity`), and the experimental
+built-in model (`zhyd-pka-protein-v0.2`, fitted, not accepted for
+production). Schema v1.
 
 ## Scope and constraints
 
@@ -16,6 +18,7 @@ and `batch` behavior remains compatible.
 | Engine | Where | License | Status |
 |---|---|---|---|
 | `propka` | [zpropka](https://github.com/N283T/zpropka), optional dependency (`zig build -Dpropka=true`) | LGPL-2.1 (derivative of PROPKA 3.5.1) | Reproduces `propka3` 3.5.1 output; default when built in |
+| `empirical` | `src/pka_empirical.zig` | MIT | Experimental; clean-room reimplementation of the PROPKA 3 protein model from a written spec, parity mode only (99.84 % of protein sites within 0.02 of `propka`) |
 | `builtin` | `src/pka.zig` | MIT | Experimental, independently written |
 
 zpropka is a faithful Zig port of PROPKA 3.5.1, kept in its own repository so
@@ -49,7 +52,9 @@ only. Improvements (metals, covalent cysteines, altloc ensembles,
 recalibration) go into the MIT engine. The specification, clean-room
 protocol, parity quirks and acceptance gates are in
 [zhyd-pka-empirical-engine.md](zhyd-pka-empirical-engine.md);
-`scripts/pka/compare_engines.py` checks parity against the oracle.
+`scripts/pka/compare_engines.py` checks parity against the oracle. Parity
+mode is implemented as `--engine empirical`; its parity numbers and the
+remaining deviations are in the spec's *Parity status* section.
 
 The built-in engine is based on scientific concepts described by the primary
 papers, especially continuous burial/desolvation, hydrogen bonds,

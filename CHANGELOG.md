@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   protein model from a written description (clean-room protocol, parity
   quirks, acceptance gates): `docs/specs/zhyd-pka-empirical-engine.md`;
   `scripts/pka/compare_engines.py` compares two zhyd pKa reports site by site
+- Experimental MIT empirical pKa engine, parity mode (`zreduce pka --engine
+  empirical`, `src/pka_empirical/`), implemented from that specification
+  with PROPKA used only as a black-box oracle; 99.84 % of 19,598 protein
+  sites on 185 PKAD-R structures within 0.02 of PROPKA (spec r2 records the
+  inferred rules and remaining deviations)
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)
   - `-s, --sdf PATH` flag on `run` and `batch` subcommands
   - Multiple molecules per file (separated by `$$$$`), molecule name used as comp_id

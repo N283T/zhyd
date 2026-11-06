@@ -3,6 +3,7 @@
 const std = @import("std");
 const model_mod = @import("../model.zig");
 const pka = @import("../pka.zig");
+const pka_empirical = @import("../pka_empirical.zig");
 const protonation = @import("../place/protonation.zig");
 const terminal = @import("../place/terminal.zig");
 const math = @import("../math.zig");
@@ -209,8 +210,11 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
     try writer.writeAll("\",\n  \"report_kind\": \"pka_prediction\",\n");
     const engine = if (models.len > 0) models[0].prediction.engine else pka.engine_name;
     const builtin_engine = std.mem.eql(u8, engine, pka.engine_name);
+    const empirical_engine = std.mem.eql(u8, engine, pka_empirical.engine_name);
     try writer.writeAll(if (builtin_engine)
         "  \"status\": \"experimental_unvalidated\",\n"
+    else if (empirical_engine)
+        "  \"status\": \"experimental_parity_with_propka3_model\",\n"
     else
         "  \"status\": \"external_reference_method\",\n");
     try writer.writeAll("  \"input\": \"");
@@ -223,6 +227,8 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
     try writer.writeAll("\",\n  \"reference_ph_for_recommended_state\": 7.0,\n");
     try writer.writeAll(if (builtin_engine)
         "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"buried_sites_poorly_modeled\"],\n"
+    else if (empirical_engine)
+        "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"experimental_engine_reproduces_propka3_model_quirks\"],\n"
     else
         "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\"],\n");
     try writer.writeAll("  \"models\": [\n");

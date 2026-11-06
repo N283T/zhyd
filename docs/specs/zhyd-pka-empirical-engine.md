@@ -1,6 +1,7 @@
 # zhyd empirical pKa engine — specification
 
-Status: draft r1 (2026-11-06). Target: an MIT-licensed protein pKa engine in
+Status: draft r2 (2026-11-07); parity mode implemented, gate G1 not yet met
+(see [Parity status](#parity-status-r2)). Target: an MIT-licensed protein pKa engine in
 zreduce that first reproduces the PROPKA 3 empirical model ("parity mode") and
 then improves on it ("zhyd mode").
 
@@ -84,10 +85,9 @@ source file and is listed in the revision log.
 | Ion | HETATM residue in the [ion table](#ions) | no (fixed charge) |
 
 **Out of scope (r1):** ligand groups (PROPKA's Sybyl-type ligand typing),
-nucleic acids, covalent coupling between titratable groups, isoelectric point
-and folding free energy profiles. For proteins, covalent coupling (two
-titratable groups of identical atom type within three bonds) does not occur
-outside disulfides, which are excluded anyway.
+nucleic acids, isoelectric point and folding free energy profiles. Covalent
+coupling between titratable groups does occur in proteins (r2) and is
+specified in [Covalent coupling](#covalent-coupling).
 
 ## Pipeline
 
@@ -127,11 +127,19 @@ reorganisation; `hydrogen_bond` = side-chain + backbone H-bond determinants;
   do not create an N-terminus. HETATM residues never form one.
 - **C-terminus (parity):** only a residue that has an OXT atom. Without OXT
   there is no C-terminal site.
-- Bonds: standard residue topology for protein atoms, peptide bond C–N
-  between consecutive residues when the C–N distance is bonding, disulfide
-  as above, distance-based bonding for HETATM atoms. Bond graphs are used
-  for (a) the 4-bond exclusion of side-chain H-bonds and (b) placing internal
-  hydrogens.
+- Bonds (r2): two heavy atoms are bonded when d ≤ 2.0 Å (S–S: d < 2.5 Å),
+  regardless of residue topology; distorted geometry therefore changes the
+  bond graph. Bond graphs are used for (a) the 4-bond exclusion of side-chain
+  H-bonds, (b) placing internal hydrogens, (c) carboxyl and backbone C=O
+  atoms (see [Group geometry](#group-geometry)) and (d) covalent coupling.
+- **Parity input (r2):** what zreduce's glue passes to the oracle: heavy
+  atoms only, coordinates rounded to 3 decimals, only standard polymer
+  residues as ATOM records, zreduce waters dropped, chains identified by the
+  auth chain id.
+- **N-terminus details (r2):** chain-start detection also restarts after a
+  residue carrying OXT. Every residue sharing the residue number of the
+  chain's N-terminal residue (insertion-code variants) is an N-terminus too.
+  UNK residues receive termini and backbone groups like standard residues.
 
 ## Conformations
 
@@ -141,6 +149,22 @@ letter (a blank-only structure has exactly one conformation). All steps run
 independently per conformation. The reported pKa and every reported term of
 a site is the arithmetic mean over conformations; sites are identified by
 (chain, residue number, insertion code, site type).
+
+Refinements (r2), each inferred from oracle reports:
+
+- **Uneven alternates:** an atom with no alternate for letter L uses its
+  first listed alternate in conformation L.
+- **Not titrating:** a site that does not titrate in a conformation (for
+  example through covalent coupling) enters the mean as pKa 99.99 with all
+  terms 0. A site that does not titrate in the first conformation is reported
+  as not titrating.
+- **Insertion codes:** conformations are matched by (chain, residue number,
+  site type), ignoring the insertion code. In every conformation after the
+  first, only the last residue of each (chain, number) family is present. The
+  mean runs over all conformations; a site absent from one counts as 0 there.
+- **Shared identities:** when one conformation holds several groups with the
+  same identity, the first in input order supplies the value, and every
+  residue carrying that identity reports it.
 
 ## Internal hydrogens
 
@@ -160,10 +184,15 @@ policy. Hydrogens are needed on:
 N–H length is 1.01 Å.
 
 - **Bisector:** for N with heavy neighbours A and B, the H lies along
-  −(â + b̂), where â and b̂ are unit vectors from N towards A and B.
-- **Planar pair:** for N bonded to one trigonal atom X, the two H lie in the
-  plane defined by N, X and X's other neighbours, each at 120° from the N→X
-  direction (i.e. the two remaining sp2 positions).
+  −(â + b̂), where â and b̂ are unit vectors from N towards A and B. A and B
+  are the first two bonded heavy neighbours of N in input order (r2; matters
+  when mixed alternates give N a third bond). A backbone N gets an H only when
+  it has exactly two bonded heavy neighbours.
+- **Planar pair:** for N bonded to one trigonal atom X with other neighbours
+  Y₁ and Y₂, let u = unit(X − N) and p = the unit component of (Y₁ − Y₂)
+  perpendicular to u. The two H are at N + 1.01·(−cos 60°·u ± sin 60°·p),
+  i.e. 120° from N→X (r2; this replaces the less precise "plane of N, X and
+  X's neighbours" wording, which fails for non-coplanar input).
 
 ## Group geometry
 
@@ -190,6 +219,11 @@ partner is a base ("base list"). Bases are ARG, LYS, HIS and the N-terminus.
 The *group atom* (used for the residue-exclusion and bond-distance rules) is
 CG (ASP), CD (GLU), OXT (C-terminus), CG (HIS), SG, OH, NZ, CZ (ARG), N
 (N-terminus), OG/OG1, CG/CD (amides), NE1, backbone N, backbone C.
+
+Carboxyl and C=O atoms come from the bond graph (r2): an ASP/GLU carboxyl
+uses only the oxygens bonded to its group carbon. If none is bonded, the
+centre is the group atom and the group has no interaction atoms. A backbone
+C=O exists only for a C with exactly one bonded O.
 
 Distances "between groups" are between centres. "Closest pair" means the
 minimum distance over the cross product of the two interaction-atom lists.
@@ -360,9 +394,9 @@ I = iterative, N = non-iterative, – = none):
      closest pair, remove both atoms, take the next closest). Each pair uses
      the COO–ARG cutoffs and an angle factor computed from (ARG atom's first
      heavy neighbour → ARG atom, ARG atom → COO atom). For an ARG H the first
-     heavy neighbour is its N. *Open point:* for an ARG N (NE has CD and CZ)
-     the neighbour choice must be confirmed against the oracle; r1 uses CZ
-     for NH1/NH2 and CD for NE.
+     heavy neighbour is its N. For an ARG N, the bonded heavy neighbour that
+     gives the largest |cos| is used (r2: NE can use CD or CZ; neither fixed
+     choice reproduces the oracle).
    - **COO–COO:** F_angle = 1, value × (1 + w₁₂).
    - **COO–HIS, CYS–HIS:** 1.60 if the pair is *buried*, else general value.
    - **CYS–CYS:** 3.60 if buried, else general value.
@@ -425,6 +459,20 @@ j < i, iterating i ascending then j ascending.
 pKa = model + desolvation + reorganisation + Σ side-chain + Σ backbone +
 Σ Coulomb determinants.
 
+## Covalent coupling
+
+(r2) Two titratable groups whose group atoms are within three bonds of each
+other are covalently coupled. One of them stops titrating and drops out of all
+pair interactions; it still counts for desolvation of others.
+
+- Acid with base: the acid drops out.
+- Two bases: the one with the lower pKa so far drops out.
+- Two acids: the one with the higher pKa so far drops out.
+- Two N-termini never couple.
+
+In proteins this removes ASP/HIS side chains on N-terminal residues and
+groups in clashing NMR models.
+
 ## Non-covalent coupling flag
 
 PROPKA marks pairs of titratable sites whose protonation states are coupled
@@ -444,7 +492,7 @@ These are reproduced in parity mode and corrected in zhyd mode:
 | Q4 | N-terminus only after TER / chain start; chain breaks ignored | follows zreduce chain-break detection (`--nterm` policy) |
 | Q5 | Ions by residue name only | metals by element and CCD; coordination-aware exclusion (already in zreduce) |
 | Q6 | Crystal waters count as burial atoms (if not removed) | waters removed |
-| Q7 | Unbounded CYS–CYS / iterative outliers (e.g. 52.96) | bounded, flagged `pka_outside_physical_range` |
+| Q7 | Averaging 99.99 for conformations where a site does not titrate yields values like 52.96 | average over titrating conformations only; values outside the physical range flagged `pka_outside_physical_range` |
 
 ## Implementation layout
 
@@ -467,8 +515,8 @@ Gates, in order:
 1. **Unit tests** per section, with expectations computed by hand from this
    document (single atoms, two-group fixtures, a three-group iterative case).
 2. **Parity (G1):** on the 185-structure PKAD-R set and the zreduce test
-   structures, parity mode vs `--engine propka --propka-keep-waters` (and the
-   same input file): |Δ predicted| ≤ 0.02 for ≥ 99 % of sites, ≤ 0.1 for all
+   structures, parity mode vs `--engine propka` (waters dropped, which matches
+   the parity water rule) on the same input file: |Δ predicted| ≤ 0.02 for ≥ 99 % of sites, ≤ 0.1 for all
    sites, and the same set of reported sites. Every exceedance is either
    fixed or recorded here as a deviation.
 3. **Accuracy (G2):** zhyd mode on the cluster split (`evaluate.py`): test MAE
@@ -476,9 +524,41 @@ Gates, in order:
    reported separately. Each zhyd-mode correction (Q1–Q7, recalibration) is
    evaluated on its own.
 
+### Parity status (r2)
+
+Parity mode against the oracle (`compare_engines.py`, same input file):
+
+| Set | Files | Sites | ≤ 0.02 | > 0.1 | Max | Same site set |
+|---|---|---|---|---|---|---|
+| PKAD-R, protein only (non-ion HETATM and nucleotides stripped) | 162 | 19,598 | 99.84 % | 19 | 0.825 | yes |
+| same without 4HHB | 161 | 19,424 | 99.98 % | 2 | 0.177 | yes |
+| PKAD-R as deposited (ligands present) | 162 | 19,502 | 95.01 % | 813 | 6.66 | yes |
+| zreduce test/example structures, protein only | 8 | 1,188 | 98.74 % | 5 | 0.84 | yes |
+
+The model term matches on every site. G1 fails on the "≤ 0.1 for all sites"
+bound. Unexplained deviations:
+
+- **D1** 4HHB: badly distorted geometry (HIS ring bond 0.67 Å); no choice of
+  ring atoms reproduces the oracle's HIS centre.
+- **D2** 1LNI B14 GLU / B17 ASP (±0.18): the oracle's acid–acid winner flips
+  only when two third-party charges are both present; the iterative scheme as
+  written cannot produce this.
+- **D3** 3EBX A6 HIS (0.08): an ASN H-bond is absent in the oracle's second
+  conformation.
+- **D4** Backbone NH after a chain break where N has one bonded atom: the
+  oracle builds an H (109.5° from N→CA, orientation rule unknown); parity
+  mode skips it.
+- **D5** 1MEK models 8 and 29: the acid–acid coupling choice is opposite to
+  [Covalent coupling](#covalent-coupling).
+- **D6** Insertion-code families (2HNT, 2CF8, 6FYS): backbone H-bond
+  residuals up to 0.84.
+- **D7** Ligand and nucleic-acid groups: out of scope (943 of the 974
+  deposited-set outliers above 0.02 disappear when they are stripped).
+
 ## Revision log
 
 | Rev | Date | Change |
 |---|---|---|
 | r1 | 2026-11-06 | Initial protein-only specification |
 | r1.1 | 2026-11-06 | Allow other papers and permissively licensed implementations |
+| r2 | 2026-11-07 | Amendments from the first parity implementation (black-box oracle probes): distance-based bonds and carboxyl atoms, covalent coupling, conformation refinements (uneven alternates, not-titrating averaging, insertion codes, shared identities), planar-pair and bisector H rules, COO–ARG neighbour rule, N-terminus details; Q7 reworded; parity status and deviations D1–D7 |

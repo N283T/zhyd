@@ -23,7 +23,7 @@ against the empirical engine
 ([spec](../../docs/specs/zhyd-pka-empirical-engine.md)):
 
 ```sh
-zreduce pka 1abc.cif --engine propka --propka-keep-waters -o oracle/1abc.json
+zreduce pka 1abc.cif --engine propka -o oracle/1abc.json
 zreduce pka 1abc.cif --engine empirical -o candidate/1abc.json
 python3 scripts/pka/compare_engines.py --oracle oracle/1abc.json --candidate candidate/1abc.json -o parity/1abc.csv
 ```

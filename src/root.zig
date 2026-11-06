@@ -13,6 +13,7 @@ pub const sdf = @import("sdf.zig");
 pub const optimize = @import("optimize/optimize.zig");
 pub const pka = @import("pka.zig");
 pub const pka_propka = @import("pka_propka.zig");
+pub const pka_empirical = @import("pka_empirical.zig");
 pub const writer = @import("writer.zig");
 pub const validate = @import("validate.zig");
 pub const gzip = @import("gzip.zig");

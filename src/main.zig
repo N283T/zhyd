@@ -41,6 +41,7 @@ const PkaConfig = struct {
 const PkaEngine = enum {
     builtin,
     propka,
+    empirical,
 
     /// PROPKA when compiled in (zig build -Dpropka=true), else built-in.
     fn default() PkaEngine {
@@ -323,11 +324,11 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
         } else if (std.mem.eql(u8, arg, "--engine")) {
             i += 1;
             if (i >= args.len) {
-                std.debug.print("Error: --engine requires 'builtin' or 'propka'\n", .{});
+                std.debug.print("Error: --engine requires 'builtin', 'empirical' or 'propka'\n", .{});
                 std.process.exit(1);
             }
             config.engine = std.meta.stringToEnum(PkaEngine, args[i]) orelse {
-                std.debug.print("Error: unknown --engine '{s}' (use 'builtin' or 'propka')\n", .{args[i]});
+                std.debug.print("Error: unknown --engine '{s}' (use 'builtin', 'empirical' or 'propka')\n", .{args[i]});
                 std.process.exit(1);
             };
         } else if (std.mem.eql(u8, arg, "--parameters")) {
@@ -410,7 +411,9 @@ fn printPkaUsage() void {
         \\    --model-only       Emit intrinsic model-pKa baseline without structure terms
         \\    --parameters PATH  JSON parameter set (calibration/research; needs its own "version")
         \\    --engine NAME      'propka' (PROPKA 3.5.1 via zpropka; default when built with
-        \\                       -Dpropka=true) or 'builtin' (experimental zhyd model)
+        \\                       -Dpropka=true), 'empirical' (experimental MIT engine,
+        \\                       parity with the PROPKA 3 model) or 'builtin'
+        \\                       (experimental zhyd model)
         \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file
         \\                       reproduction; default drops them like PDB2PQR)
         \\
@@ -830,19 +833,18 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
     }
     const parameters: zreduce.pka.Parameters = if (parsed_params) |p| p.value else .{};
     const engine = config.engine orelse PkaEngine.default();
-    if (engine == .propka) {
-        if (!zreduce.pka_propka.available) {
-            std.debug.print("Error: this zreduce was built without PROPKA; rebuild with -Dpropka=true\n", .{});
-            std.process.exit(1);
-        }
-        if (config.parameters_path != null or config.model_only) {
-            std.debug.print("Error: --parameters and --model-only apply to --engine builtin only\n", .{});
-            std.process.exit(1);
-        }
+    if (engine == .propka and !zreduce.pka_propka.available) {
+        std.debug.print("Error: this zreduce was built without PROPKA; rebuild with -Dpropka=true\n", .{});
+        std.process.exit(1);
+    }
+    if (engine != .builtin and (config.parameters_path != null or config.model_only)) {
+        std.debug.print("Error: --parameters and --model-only apply to --engine builtin only\n", .{});
+        std.process.exit(1);
     }
     switch (engine) {
         .builtin => std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version}),
         .propka => std.debug.print("note: pKa engine {s}; states are reported, not applied to coordinates\n", .{zreduce.pka_propka.engine_version}),
+        .empirical => std.debug.print("warning: pKa engine {s} ({s}) is experimental; states are reported, not applied to coordinates\n", .{ zreduce.pka_empirical.engine_name, zreduce.pka_empirical.parameter_version }),
     }
     const prediction_config = zreduce.pka.Config{
         .parameters = parameters,
@@ -926,6 +928,7 @@ fn runPkaEngine(
     return switch (engine) {
         .builtin => zreduce.pka.predict(allocator, mdl, config),
         .propka => zreduce.pka_propka.predict(allocator, mdl, propka_options),
+        .empirical => zreduce.pka_empirical.predict(allocator, mdl, .{}),
     };
 }
 
