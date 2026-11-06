@@ -6,23 +6,37 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const with_propka = b.option(
+        bool,
+        "propka",
+        "Enable the PROPKA 3.5.1 pKa engine via zpropka (LGPL-2.1; default off)",
+    ) orelse false;
+
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", version);
+    options.addOption(bool, "propka", with_propka);
+    const options_module = options.createModule();
+
     // Library module
     const mod = b.addModule("zreduce", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
+        .imports = &.{.{ .name = "build_options", .module = options_module }},
     });
+    if (with_propka) {
+        if (b.lazyDependency("zpropka", .{ .target = target, .optimize = optimize })) |dep| {
+            mod.addImport("zpropka", dep.module("zpropka"));
+        }
+    }
 
     // CLI executable
-    const options = b.addOptions();
-    options.addOption([]const u8, "version", version);
-
     const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zreduce", .module = mod },
-            .{ .name = "build_options", .module = options.createModule() },
+            .{ .name = "build_options", .module = options_module },
         },
     });
 

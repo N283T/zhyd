@@ -40,6 +40,10 @@
         "null"
       ]
     },
+    "engine": {
+      "description": "pKa engine that produced the values (pka_prediction only), e.g. zhyd-builtin or PROPKA 3.5.1 (zpropka).",
+      "type": "string"
+    },
     "reference_ph_for_recommended_state": {
       "type": "number"
     },
@@ -202,7 +206,8 @@
                 "reason": {
                   "enum": [
                     "disulfide",
-                    "metal_coordinated"
+                    "metal_coordinated",
+                    "covalently_bonded"
                   ]
                 }
               }
@@ -254,6 +259,7 @@
             "GLU",
             "HIS",
             "LYS",
+            "ARG",
             "CYS",
             "TYR",
             "N_TERM",

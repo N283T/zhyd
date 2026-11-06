@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     (`scripts/pka/params/`); `pka --parameters PATH` loads a custom set
   - PKAD-R normalization, structure fetch, prediction join, and calibration
     scripts (`scripts/pka/pkadr.py`, `scripts/pka/calibrate.py`)
+- Optional PROPKA 3.5.1 engine for `zreduce pka` via the LGPL-2.1 zpropka
+  package (`zig build -Dpropka=true`, `--engine propka|builtin`,
+  `--propka-keep-waters`); output matches `propka3` on 185 PKAD-R structures
+  (14,291 sites, max |Δ| 0.005 = PROPKA's print rounding). The report records
+  the engine; ARG sites are reported by this engine
+- CYS bonded to a non-cysteine heavy atom is excluded as `covalently_bonded`;
+  metal ligands are classified before disulfides, so `_struct_conn` metalc
+  flags no longer make a metal-bound CYS look like a cystine
+- Values outside -5..20 are kept but flagged `pka_outside_physical_range`
 - External PROPKA oracle and cluster-split PKAD-R evaluation harness under
   `scripts/pka/`
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)

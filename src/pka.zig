@@ -13,12 +13,16 @@ const Vec3f32 = math.Vec3(f32);
 
 pub const schema_version = "zhyd.protonation.v1";
 pub const parameter_version = "zhyd-pka-protein-v0.2";
+pub const engine_name = "zhyd-builtin";
 
 pub const SiteKind = enum {
     asp,
     glu,
     his,
     lys,
+    /// Only produced by the PROPKA engine; the built-in model treats ARG as a
+    /// fixed +1 charge.
+    arg,
     cys,
     tyr,
     n_term,
@@ -30,6 +34,7 @@ pub const SiteKind = enum {
             .glu => "GLU",
             .his => "HIS",
             .lys => "LYS",
+            .arg => "ARG",
             .cys => "CYS",
             .tyr => "TYR",
             .n_term => "N_TERM",
@@ -40,7 +45,7 @@ pub const SiteKind = enum {
     pub fn isAcid(self: SiteKind) bool {
         return switch (self) {
             .asp, .glu, .cys, .tyr, .c_term => true,
-            .his, .lys, .n_term => false,
+            .his, .lys, .arg, .n_term => false,
         };
     }
 };
@@ -54,6 +59,10 @@ pub const ExclusionReason = enum {
     /// Side-chain ligand of a metal ion; the metal-bound state is outside
     /// this model and must not be guessed from protein-only terms.
     metal_coordinated,
+    /// SG covalently bonded to a non-cysteine residue or ligand (e.g. a
+    /// covalent inhibitor or modification), or flagged covalent by
+    /// `_struct_conn` without a resolvable partner.
+    covalently_bonded,
 };
 
 pub const ExcludedSite = struct {
@@ -92,6 +101,8 @@ pub const Prediction = struct {
     omitted_sites: u32,
     /// Version string of the parameter set that produced these values.
     parameter_version: []const u8 = parameter_version,
+    /// Which pKa engine produced these values.
+    engine: []const u8 = engine_name,
 
     pub fn deinit(self: *Prediction) void {
         self.allocator.free(self.sites);
@@ -166,6 +177,7 @@ pub fn modelPka(kind: SiteKind) f32 {
         .glu => 4.5,
         .his => 6.5,
         .lys => 10.5,
+        .arg => 12.5,
         .cys => 8.3,
         .tyr => 10.1,
         .n_term => 8.0,
@@ -261,6 +273,7 @@ fn siteCenter(mdl: *const Model, residue_idx: u32, kind: SiteKind) ?Vec3f32 {
         .glu => midpoint(namedAtom(mdl, residue_idx, "OE1"), namedAtom(mdl, residue_idx, "OE2")),
         .his => midpoint(namedAtom(mdl, residue_idx, "ND1"), namedAtom(mdl, residue_idx, "NE2")),
         .lys => namedAtom(mdl, residue_idx, "NZ"),
+        .arg => namedAtom(mdl, residue_idx, "CZ"),
         .cys => namedAtom(mdl, residue_idx, "SG"),
         .tyr => namedAtom(mdl, residue_idx, "OH"),
         .n_term => namedAtom(mdl, residue_idx, "N"),
@@ -288,6 +301,7 @@ fn ligandAtomNames(kind: SiteKind) []const []const u8 {
         .glu => &.{ "OE1", "OE2" },
         .his => &.{ "ND1", "NE2" },
         .lys => &.{"NZ"},
+        .arg => &.{ "NE", "NH1", "NH2" },
         .cys => &.{"SG"},
         .tyr => &.{"OH"},
         .n_term, .c_term => &.{},
@@ -304,35 +318,49 @@ pub fn isMetalCoordinated(mdl: *const Model, residue_idx: u32, kind: SiteKind, m
     return false;
 }
 
-fn exclusionReason(mdl: *const Model, residue_idx: u32, kind: SiteKind, metals: []const Vec3f32) ?ExclusionReason {
-    if (kind == .cys and isCovalentlyBondedCys(mdl, residue_idx)) return .disulfide;
+pub fn exclusionReason(mdl: *const Model, residue_idx: u32, kind: SiteKind, metals: []const Vec3f32) ?ExclusionReason {
+    // Metal first: `_struct_conn` flags metalc bonds too, and a metal ligand
+    // must not be mistaken for a disulfide.
     if (isMetalCoordinated(mdl, residue_idx, kind, metals)) return .metal_coordinated;
+    if (kind == .cys) return cysteineBond(mdl, residue_idx);
     return null;
+}
+
+/// Maximum SG–heavy-atom distance treated as a covalent bond to a
+/// non-cysteine partner (S–C ≈ 1.8 Å).
+const covalent_max_distance: f32 = 2.1;
+
+/// Classify a non-metal covalent bond on a CYS SG by its nearest partner.
+/// Callers check metal coordination first.
+pub fn cysteineBond(mdl: *const Model, residue_idx: u32) ?ExclusionReason {
+    const res = mdl.residues.items[residue_idx];
+    var sg: ?Vec3f32 = null;
+    var flagged = false;
+    for (mdl.atoms.items[res.atom_start..res.atom_end]) |atom| {
+        if (atom.is_hydrogen or !std.mem.eql(u8, atom.nameSlice(), "SG")) continue;
+        if (atom.flags.bonded_inter_residue) flagged = true;
+        if (sg == null and (atom.altloc == ' ' or atom.altloc == 'A')) sg = atom.pos;
+    }
+    const pos = sg orelse return if (flagged) .covalently_bonded else null;
+    var covalent_partner = false;
+    for (mdl.atoms.items) |atom| {
+        if (atom.is_hydrogen or atom.residue_idx == residue_idx) continue;
+        if (atom.altloc != ' ' and atom.altloc != 'A') continue;
+        if (atom.element_type.info().flags.metallic or atom.flags.metallic) continue;
+        const d = pos.distance(atom.pos);
+        if (d > disulfide_max_distance) continue;
+        const other = mdl.residues.items[atom.residue_idx];
+        if (std.mem.eql(u8, atom.nameSlice(), "SG") and std.mem.eql(u8, other.compIdSlice(), "CYS")) return .disulfide;
+        if (d <= covalent_max_distance and !isSolvent(mdl, atom.residue_idx)) covalent_partner = true;
+    }
+    if (covalent_partner) return .covalently_bonded;
+    // A flag without a partner in this model (e.g. a symmetry-mate
+    // disulfide) is still covalent; do not guess which kind.
+    return if (flagged) .covalently_bonded else null;
 }
 
 /// Maximum SG–SG distance treated as a disulfide bond (typical 2.03–2.05 Å).
 const disulfide_max_distance: f32 = 2.5;
-
-/// True when the CYS side-chain sulfur is covalently bonded to another residue:
-/// either flagged from `_struct_conn`, or within disulfide distance of another
-/// CYS SG. The geometric check covers PDB input and files without
-/// `_struct_conn`.
-pub fn isCovalentlyBondedCys(mdl: *const Model, residue_idx: u32) bool {
-    const res = mdl.residues.items[residue_idx];
-    var sg: ?Vec3f32 = null;
-    for (mdl.atoms.items[res.atom_start..res.atom_end]) |atom| {
-        if (atom.is_hydrogen or !std.mem.eql(u8, atom.nameSlice(), "SG")) continue;
-        if (atom.flags.bonded_inter_residue) return true;
-        if (atom.altloc == ' ' or atom.altloc == 'A') sg = atom.pos;
-    }
-    const pos = sg orelse return false;
-    for (mdl.residues.items, 0..) |other, other_idx| {
-        if (other_idx == residue_idx or !std.mem.eql(u8, other.compIdSlice(), "CYS")) continue;
-        const other_sg = namedAtom(mdl, @intCast(other_idx), "SG") orelse continue;
-        if (pos.distance(other_sg) <= disulfide_max_distance) return true;
-    }
-    return false;
-}
 
 fn namedAtom(mdl: *const Model, residue_idx: u32, name: []const u8) ?Vec3f32 {
     const res = mdl.residues.items[residue_idx];
@@ -458,10 +486,15 @@ fn meanChargeAtPh(kind: SiteKind, pka: f32, ph: f32) f32 {
     return protonated;
 }
 
-fn assessConfidence(site: SiteResult) Confidence {
+pub fn assessConfidence(site: SiteResult) Confidence {
     if (site.burial_fraction >= 0.70 or @abs(site.terms.coupling) >= 1.0) return .low;
     if (site.burial_fraction >= 0.35 or site.coupled or @abs(site.terms.electrostatic) >= 0.5) return .medium;
     return .high;
+}
+
+/// Values outside this range are not credible for protein residues.
+pub fn isPhysicalPka(value: f32) bool {
+    return value >= -5.0 and value <= 20.0;
 }
 
 fn clampPka(value: f32) f32 {
@@ -549,11 +582,38 @@ test "metal-coordinated cysteine is excluded with a reason" {
     zn.element_type = .Zn;
     zn.residue_idx = 1;
     try mdl.atoms.append(testing.allocator, zn);
+    // struct_conn also flags metalc bonds; the flag must not turn a metal
+    // ligand into a "disulfide".
+    for (mdl.atoms.items) |*atom| {
+        if (atom.residue_idx == 0 and std.mem.eql(u8, atom.nameSlice(), "SG")) atom.flags.bonded_inter_residue = true;
+    }
     var result = try predict(testing.allocator, &mdl, .{});
     defer result.deinit();
     try testing.expectEqual(@as(usize, 1), result.excluded.len);
     try testing.expectEqual(ExclusionReason.metal_coordinated, result.excluded[0].reason);
     try testing.expectEqual(@as(u32, 0), result.excluded[0].residue_idx);
+}
+
+test "cysteine bonded to a non-cysteine heavy atom is excluded as covalently bonded" {
+    const source = @embedFile("test_data/disulfide.cif");
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    var first_sg: Vec3f32 = undefined;
+    for (mdl.atoms.items) |*atom| {
+        if (!std.mem.eql(u8, atom.nameSlice(), "SG")) continue;
+        if (atom.residue_idx == 0) first_sg = atom.pos else atom.pos.x += 5.0;
+    }
+    // A ligand-like carbon 1.8 Å from the first SG (S–C single bond).
+    var c = mdl.atoms.items[0];
+    c.pos = .{ .x = first_sg.x, .y = first_sg.y + 1.8, .z = first_sg.z };
+    c.element_type = .C;
+    c.setName("C1");
+    c.residue_idx = 1;
+    try mdl.atoms.append(testing.allocator, c);
+    var result = try predict(testing.allocator, &mdl, .{});
+    defer result.deinit();
+    try testing.expectEqual(@as(usize, 1), result.excluded.len);
+    try testing.expectEqual(ExclusionReason.covalently_bonded, result.excluded[0].reason);
 }
 
 test "missing required side-chain atoms are omitted explicitly" {

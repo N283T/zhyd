@@ -359,3 +359,42 @@ test "real-file pka: crystal waters do not change structure terms" {
         try testing.expectEqual(a.burial_fraction, b.burial_fraction);
     }
 }
+
+test "real-file pka: 2cf8 PROPKA engine matches PROPKA 3.5.1" {
+    if (!zreduce.pka_propka.available) return error.SkipZigTest;
+    var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
+    defer mdl.deinit();
+    var result = try zreduce.pka_propka.predict(testing.allocator, &mdl, .{});
+    defer result.deinit();
+
+    // Reference: propka3 3.5.1 on the same model (hydrogens and waters
+    // removed, PDB written by gemmi). Chain H starts at Ile16, so its N+
+    // group also checks TER handling between chains.
+    const Expected = struct { chain: []const u8, num: i32, kind: zreduce.pka.SiteKind, pka: f32 };
+    const expected = [_]Expected{
+        .{ .chain = "H", .num = 194, .kind = .asp, .pka = 4.41 },
+        .{ .chain = "H", .num = 192, .kind = .glu, .pka = 4.71 },
+        .{ .chain = "H", .num = 57, .kind = .his, .pka = 4.86 },
+        .{ .chain = "H", .num = 16, .kind = .n_term, .pka = 7.67 },
+        .{ .chain = "I", .num = 2, .kind = .n_term, .pka = 7.49 },
+    };
+    for (expected) |e| {
+        var found = false;
+        for (result.sites) |site| {
+            const res = mdl.residues.items[site.residue_idx];
+            const chain = mdl.chains.items[res.chain_idx];
+            if (site.kind != e.kind or res.auth_seq_id != e.num) continue;
+            if (!std.mem.eql(u8, chain.authSlice(), e.chain)) continue;
+            try testing.expectApproxEqAbs(e.pka, site.predicted_pka, 0.006);
+            found = true;
+        }
+        try testing.expect(found);
+    }
+    // PROPKA marks all eight cysteines 99.99; zreduce reports them as excluded.
+    var n_disulfide: usize = 0;
+    for (result.excluded) |site| {
+        if (site.reason == .disulfide) n_disulfide += 1;
+    }
+    try testing.expectEqual(@as(usize, 8), n_disulfide);
+    for (result.sites) |site| try testing.expect(site.kind != .cys);
+}

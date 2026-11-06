@@ -1,6 +1,8 @@
 # zhyd protonation and pKa architecture
 
-Status: phase 3 development run complete; parameters `zhyd-pka-protein-v0.2` (fitted, not accepted for production); schema v1.
+Status: two pKa engines. PROPKA 3.5.1 via the optional zpropka port
+(reference method, reproduces `propka3`), and the experimental built-in model
+(`zhyd-pka-protein-v0.2`, fitted, not accepted for production). Schema v1.
 
 ## Scope and constraints
 
@@ -9,11 +11,46 @@ outputs explicit: protonation macrostate, formal charge, and hydrogen
 coordinates. The current executable and package remain named `zreduce`; `run`
 and `batch` behavior remains compatible.
 
-The implementation is independent and MIT-licensed. PROPKA is LGPL-2.1 and is
-used only as an executable correctness oracle. No PROPKA code, control flow, or
-parameter tables were copied or translated. The method is based on scientific
-concepts described by the primary papers, especially continuous burial/
-desolvation, hydrogen bonds, electrostatics, and coupled groups:
+## pKa engines and licensing
+
+| Engine | Where | License | Status |
+|---|---|---|---|
+| `propka` | [zpropka](https://github.com/N283T/zpropka), optional dependency (`zig build -Dpropka=true`) | LGPL-2.1 (derivative of PROPKA 3.5.1) | Reproduces `propka3` 3.5.1 output; default when built in |
+| `builtin` | `src/pka.zig` | MIT | Experimental, independently written |
+
+zpropka is a faithful Zig port of PROPKA 3.5.1, kept in its own repository so
+the default zreduce build stays MIT-only. zreduce talks to it only through
+`zpropka.api.predictPdb`, from `src/pka_propka.zig`, which:
+
+- writes heavy atoms as PDB text: single-character chain aliases for long
+  auth IDs, standard residues as ATOM and modified residues as HETATM (PDB
+  convention, which PROPKA's ligand handling expects), and `TER   ` after
+  every polymer chain (PROPKA resets N-terminus detection there);
+- drops crystal waters by default, as PDB2PQR does before PROPKA (PROPKA
+  itself treats HOH as a ligand). On PKAD-R this changed nothing measurable
+  (test MAE 0.677 vs 0.678); `--propka-keep-waters` restores PROPKA-on-file
+  behavior;
+- maps PROPKA groups back to residues by (chain alias, number, insertion
+  code), moves disulfide / covalently bonded / metal-coordinated residues to
+  `excluded_sites`, and maps determinants onto the schema terms:
+  `burial` = desolvation, `hydrogen_bond` = side-chain + backbone H-bonds,
+  `electrostatic` = Coulomb, `coupling` = 0 (PROPKA's terms are additive to
+  the reported pKa);
+- keeps PROPKA values outside -5..20 (PROPKA occasionally produces them for
+  coupled cysteines), with low confidence and `pka_outside_physical_range`.
+
+Verified against `propka3` 3.5.1 on 185 PKAD-R structures with waters kept:
+14,291 sites, max |Δ| 0.005 (PROPKA prints two decimals).
+
+Plan for the built-in engine: describe PROPKA's method as a specification
+(equations, conditions, parameters cited to the papers, not code), write an
+MIT implementation from that specification, and use zpropka as a test oracle
+only. Improvements (metals, covalent cysteines, altloc ensembles,
+recalibration) go into the MIT engine.
+
+The built-in engine is based on scientific concepts described by the primary
+papers, especially continuous burial/desolvation, hydrogen bonds,
+electrostatics, and coupled groups:
 
 - Olsson et al., *JCTC* 7, 525–537 (2011),
   [doi:10.1021/ct100578z](https://doi.org/10.1021/ct100578z).
@@ -95,11 +132,16 @@ deep burial or strong coupling.
 
 - The first blank or `A` conformer is used; no ensemble averaging yet.
 - Missing required site atoms omit the site and increment `omitted_sites`.
-- Disulfide-bonded CYS (SG flagged by `_struct_conn` or SG–SG ≤ 2.5 Å) and
-  side chains with a ligand atom ≤ 2.8 Å from a metal ion are not predicted.
-  They are listed in `excluded_sites` with reason `disulfide` or
-  `metal_coordinated`; `run --state-json` adds the
-  `metal_coordinated_state_not_modeled` warning to metal ligands.
+- Residues are classified before prediction, for both engines, in this order:
+  a side-chain ligand atom ≤ 2.8 Å from a metal ion → `metal_coordinated`;
+  CYS SG ≤ 2.5 Å from another CYS SG → `disulfide`; CYS SG ≤ 2.1 Å from any
+  other non-solvent heavy atom, or flagged covalent by `_struct_conn` with no
+  partner in the model → `covalently_bonded`. Metal comes first because
+  `_struct_conn` also flags metalc bonds. These residues are listed in
+  `excluded_sites`. `run --state-json` reports cystines as
+  `disulfide_bonded`, other covalent CYS as `covalently_bonded` (source
+  `covalent_bond`), and adds `metal_coordinated_state_not_modeled` to metal
+  ligands.
 - Explicit solvent (water entities, HOH/WAT/DOD/H2O) is the reference state of
   the model pKa values and is ignored by the burial and hydrogen-bond terms.
 - Missing entity metadata falls back only for the 20 standard amino-acid names.
@@ -197,6 +239,20 @@ python3 scripts/pka/evaluate.py predictions.csv --output metrics.json
 python3 scripts/pka/calibrate.py canonical.csv --structures structures/ \
     --version my-fit -o fit.json   # train split only
 ```
+
+### PROPKA engine on PKAD-R
+
+Same split, PROPKA 3.5.1 via zpropka (waters dropped, exclusions applied):
+
+| Split | n | PROPKA MAE / RMSE | built-in v0.2 MAE | null MAE |
+|---|---|---|---|---|
+| train | 550 | 0.87 / 1.40 | 0.69 | 0.79 |
+| test | 129 | 1.13 / 4.50 | 0.80 | 0.80 |
+| SNase stress | 102 | 0.93 / 1.21 | 1.95 | 1.96 |
+
+PROPKA's test error is dominated by a few CYS (test CYS MAE 15, including a
+52.96 prediction PROPKA itself makes); without CYS its test MAE is about
+0.68. PROPKA is clearly better on buried groups (SNase).
 
 ## Phases and acceptance criteria
 

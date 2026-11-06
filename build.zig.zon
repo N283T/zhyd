@@ -4,4 +4,9 @@
     .fingerprint = 0x573a63b09b575ec7,
     .minimum_zig_version = "0.16.0",
     .paths = .{ "build.zig", "build.zig.zon", "src" },
+    .dependencies = .{
+        // Optional PROPKA engine (LGPL-2.1). Only fetched with -Dpropka=true;
+        // the default build stays MIT-only.
+        .zpropka = .{ .path = "../zpropka", .lazy = true },
+    },
 }

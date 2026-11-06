@@ -92,7 +92,7 @@ fn writeAppliedSite(
 ) !void {
     const res = mdl.residues.items[residue_idx];
     const chain = mdl.chains.items[res.chain_idx];
-    var state = appliedState(mdl, residue_idx, kind, overrides, nterm_mode);
+    var state = appliedState(mdl, residue_idx, kind, overrides, nterm_mode, metals);
     // The applied state comes from protein-only rules; flag metal ligands so
     // downstream charge models do not trust it blindly.
     if (state.warning == null and pka.isMetalCoordinated(mdl, residue_idx, kind, metals)) {
@@ -125,19 +125,23 @@ fn appliedState(
     kind: pka.SiteKind,
     overrides: ?*const protonation.ProtonationOverrides,
     nterm_mode: terminal.NtermMode,
+    metals: []const math.Vec3(f32),
 ) AppliedState {
     const override_state = if (overrides) |value| value.find(mdl, residue_idx) else null;
 
-    // Cystine sulfur has no titratable proton; a thiol/thiolate override
-    // cannot apply and is reported rather than silently honored.
-    if (kind == .cys and pka.isCovalentlyBondedCys(mdl, residue_idx)) {
-        const overridden = if (override_state) |value| value == .cys else false;
-        return .{
-            .macrostate = "disulfide_bonded",
-            .charge = 0,
-            .source = "covalent_bond",
-            .warning = if (overridden) "override_ignored_covalent_bond" else null,
-        };
+    // A covalently bonded SG (cystine or covalent adduct) has no titratable
+    // proton; a thiol/thiolate override cannot apply and is reported rather
+    // than silently honored. Metal ligands are handled by the caller.
+    if (kind == .cys and !pka.isMetalCoordinated(mdl, residue_idx, kind, metals)) {
+        if (pka.cysteineBond(mdl, residue_idx)) |bond| {
+            const overridden = if (override_state) |value| value == .cys else false;
+            return .{
+                .macrostate = if (bond == .disulfide) "disulfide_bonded" else "covalently_bonded",
+                .charge = 0,
+                .source = "covalent_bond",
+                .warning = if (overridden) "override_ignored_covalent_bond" else null,
+            };
+        }
     }
 
     if (override_state) |value| switch (value) {
@@ -161,7 +165,7 @@ fn appliedState(
 
     return switch (kind) {
         .asp, .glu => .{ .macrostate = "deprotonated_anion", .charge = -1, .source = "default" },
-        .lys => .{ .macrostate = "protonated_cation", .charge = 1, .source = "default" },
+        .lys, .arg => .{ .macrostate = "protonated_cation", .charge = 1, .source = "default" },
         .cys, .tyr => .{ .macrostate = "protonated_neutral", .charge = 0, .source = "default" },
         .his => histidineAppliedState(mdl, residue_idx),
         .n_term => if (nterm_mode == .neutral and !std.mem.eql(u8, mdl.residues.items[residue_idx].compIdSlice(), "PRO"))
@@ -203,14 +207,24 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
     try writer.writeAll("{\n  \"schema_version\": \"");
     try writeJsonString(writer, pka.schema_version);
     try writer.writeAll("\",\n  \"report_kind\": \"pka_prediction\",\n");
-    try writer.writeAll("  \"status\": \"experimental_unvalidated\",\n");
+    const engine = if (models.len > 0) models[0].prediction.engine else pka.engine_name;
+    const builtin_engine = std.mem.eql(u8, engine, pka.engine_name);
+    try writer.writeAll(if (builtin_engine)
+        "  \"status\": \"experimental_unvalidated\",\n"
+    else
+        "  \"status\": \"external_reference_method\",\n");
     try writer.writeAll("  \"input\": \"");
     try writeJsonString(writer, input);
     try writer.writeAll("\",\n  \"parameter_version\": \"");
     const version = if (models.len > 0) models[0].prediction.parameter_version else pka.parameter_version;
     try writeJsonString(writer, version);
+    try writer.writeAll("\",\n  \"engine\": \"");
+    try writeJsonString(writer, engine);
     try writer.writeAll("\",\n  \"reference_ph_for_recommended_state\": 7.0,\n");
-    try writer.writeAll("  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"buried_sites_poorly_modeled\"],\n");
+    try writer.writeAll(if (builtin_engine)
+        "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"buried_sites_poorly_modeled\"],\n"
+    else
+        "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\"],\n");
     try writer.writeAll("  \"models\": [\n");
 
     for (models, 0..) |entry, model_i| {
@@ -253,6 +267,11 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
             if (site.confidence == .low) {
                 if (wrote_warning) try writer.writeAll(", ");
                 try writer.writeAll("\"low_confidence_environment\"");
+                wrote_warning = true;
+            }
+            if (!pka.isPhysicalPka(site.predicted_pka)) {
+                if (wrote_warning) try writer.writeAll(", ");
+                try writer.writeAll("\"pka_outside_physical_range\"");
             }
             try writer.writeAll("]}");
             if (site_i + 1 < entry.prediction.sites.len) try writer.writeAll(",");

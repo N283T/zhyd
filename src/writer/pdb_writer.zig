@@ -29,7 +29,7 @@ const writeFixedFloat2 = format.writeFixedFloat2;
 /// PDB convention: 1-char elements start at column 14 (index 1), 2-char elements
 /// start at column 13 (index 0).
 /// Raw atom name string (trimmed) → 4-char space-padded array.
-fn formatAtomNamePdb(trimmed: []const u8, elem_sym: []const u8) [4]u8 {
+pub fn formatAtomNamePdb(trimmed: []const u8, elem_sym: []const u8) [4]u8 {
     var out = [4]u8{ ' ', ' ', ' ', ' ' };
     if (trimmed.len == 0) return out;
 

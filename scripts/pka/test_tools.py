@@ -54,6 +54,18 @@ class ToolTests(unittest.TestCase):
             )
             self.assertEqual(compare_propka.parse_propka(path)[("ASP", 42, "A")], 4.25)
 
+    def test_propka_summary_parser_handles_large_numbers_and_arg(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "x.pka"
+            path.write_text(
+                "SUMMARY OF THIS PREDICTION\n"
+                "   ASP1014 D     3.10       3.80\n"
+                "   ARG  12 A    12.40      12.50\n"
+            )
+            values = compare_propka.parse_propka(path)
+            self.assertEqual(values[("ASP", 1014, "D")], 3.10)
+            self.assertEqual(values[("ARG", 12, "A")], 12.40)
+
 
 class PkadrTests(unittest.TestCase):
     def test_similar_entries_share_a_cluster(self):

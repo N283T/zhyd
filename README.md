@@ -23,6 +23,18 @@ zig build test --summary all
 
 The optimized executable is written to `zig-out/bin/zreduce`.
 
+### Optional PROPKA engine
+
+`zreduce pka` can use PROPKA 3.5.1 through
+[zpropka](https://github.com/N283T/zpropka), a Zig port that reproduces
+PROPKA's output. zpropka is LGPL-2.1, so it is not part of the default
+(MIT-only) build. Check it out next to this repository and enable it:
+
+```bash
+git clone https://github.com/N283T/zpropka ../zpropka
+zig build -Dpropka=true -Doptimize=ReleaseFast
+```
+
 ## Usage
 
 ```bash
@@ -132,10 +144,18 @@ Applied state reports and experimental pKa reports use the versioned
 validated for production charge assignment and intentionally does not expose a
 `--ph` coordinate-assignment option.
 
-The current parameter set, `zhyd-pka-protein-v0.2`, was fitted on a
+With `-Dpropka=true`, `pka` uses PROPKA 3.5.1 by default (`--engine propka`).
+Its values match `propka3` run on the same structure to the two decimals
+PROPKA prints. Crystal waters are dropped before PROPKA, as PDB2PQR does;
+`--propka-keep-waters` keeps them for an exact reproduction of PROPKA run on
+the deposited file. `--engine builtin` selects the experimental built-in
+model below.
+
+The built-in parameter set, `zhyd-pka-protein-v0.2`, was fitted on a
 cluster-split PKAD-R training set. On held-out proteins it is slightly better
 than intrinsic model pKa values alone (MAE 0.80 vs 0.85), but it does poorly on
-deeply buried groups such as the SNase stress set. Disulfide and
+deeply buried groups such as the SNase stress set (MAE 1.95, against 0.93 for
+PROPKA). With either engine, disulfide, covalently modified and
 metal-coordinated residues are listed as `excluded_sites` instead of being
 predicted. See `docs/specs/zhyd-protonation-pka.md` and `scripts/pka/`.
 

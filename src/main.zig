@@ -34,6 +34,18 @@ const PkaConfig = struct {
     model_filter: zreduce.run.ModelFilter = .all,
     model_only: bool = false,
     parameters_path: ?[]const u8 = null,
+    engine: ?PkaEngine = null,
+    propka_keep_waters: bool = false,
+};
+
+const PkaEngine = enum {
+    builtin,
+    propka,
+
+    /// PROPKA when compiled in (zig build -Dpropka=true), else built-in.
+    fn default() PkaEngine {
+        return if (zreduce.pka_propka.available) .propka else .builtin;
+    }
 };
 
 /// Fields shared between RunConfig and BatchConfig, parsed by parseCommonOption.
@@ -306,6 +318,18 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
             config.output_path = args[i];
         } else if (std.mem.eql(u8, arg, "--model-only")) {
             config.model_only = true;
+        } else if (std.mem.eql(u8, arg, "--propka-keep-waters")) {
+            config.propka_keep_waters = true;
+        } else if (std.mem.eql(u8, arg, "--engine")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --engine requires 'builtin' or 'propka'\n", .{});
+                std.process.exit(1);
+            }
+            config.engine = std.meta.stringToEnum(PkaEngine, args[i]) orelse {
+                std.debug.print("Error: unknown --engine '{s}' (use 'builtin' or 'propka')\n", .{args[i]});
+                std.process.exit(1);
+            };
         } else if (std.mem.eql(u8, arg, "--parameters")) {
             i += 1;
             if (i >= args.len) {
@@ -385,6 +409,10 @@ fn printPkaUsage() void {
         \\    --model VALUE      Model selection: 'all' (default) or a number
         \\    --model-only       Emit intrinsic model-pKa baseline without structure terms
         \\    --parameters PATH  JSON parameter set (calibration/research; needs its own "version")
+        \\    --engine NAME      'propka' (PROPKA 3.5.1 via zpropka; default when built with
+        \\                       -Dpropka=true) or 'builtin' (experimental zhyd model)
+        \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file
+        \\                       reproduction; default drops them like PDB2PQR)
         \\
     , .{});
 }
@@ -801,7 +829,21 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         };
     }
     const parameters: zreduce.pka.Parameters = if (parsed_params) |p| p.value else .{};
-    std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version});
+    const engine = config.engine orelse PkaEngine.default();
+    if (engine == .propka) {
+        if (!zreduce.pka_propka.available) {
+            std.debug.print("Error: this zreduce was built without PROPKA; rebuild with -Dpropka=true\n", .{});
+            std.process.exit(1);
+        }
+        if (config.parameters_path != null or config.model_only) {
+            std.debug.print("Error: --parameters and --model-only apply to --engine builtin only\n", .{});
+            std.process.exit(1);
+        }
+    }
+    switch (engine) {
+        .builtin => std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version}),
+        .propka => std.debug.print("note: pKa engine {s}; states are reported, not applied to coordinates\n", .{zreduce.pka_propka.engine_version}),
+    }
     const prediction_config = zreduce.pka.Config{
         .parameters = parameters,
         .include_structure_terms = !config.model_only,
@@ -831,7 +873,7 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         defer allocator.free(reports);
         for (entries.items, 0..) |*entry, i| {
             zreduce.place.applyChemistry(&entry.model);
-            predictions[i] = zreduce.pka.predict(allocator, &entry.model, prediction_config) catch |err| {
+            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }) catch |err| {
                 std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
                 std.process.exit(1);
             };
@@ -860,7 +902,7 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         defer allocator.free(reports);
         for (parsed.entries.items, 0..) |*entry, i| {
             zreduce.place.applyChemistry(&entry.model);
-            predictions[i] = zreduce.pka.predict(allocator, &entry.model, prediction_config) catch |err| {
+            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }) catch |err| {
                 std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
                 std.process.exit(1);
             };
@@ -872,6 +914,19 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
             std.process.exit(1);
         };
     }
+}
+
+fn runPkaEngine(
+    allocator: Allocator,
+    engine: PkaEngine,
+    mdl: *const zreduce.model.Model,
+    config: zreduce.pka.Config,
+    propka_options: zreduce.pka_propka.Options,
+) !zreduce.pka.Prediction {
+    return switch (engine) {
+        .builtin => zreduce.pka.predict(allocator, mdl, config),
+        .propka => zreduce.pka_propka.predict(allocator, mdl, propka_options),
+    };
 }
 
 fn writePkaReport(

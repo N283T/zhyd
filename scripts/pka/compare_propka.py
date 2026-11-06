@@ -10,7 +10,8 @@ import re
 from pathlib import Path
 
 SUMMARY = re.compile(
-    r"^\s*(ASP|GLU|HIS|LYS|CYS|TYR|N\+|C-)\s+(-?\d+)\s+(\S+)\s+(-?\d+(?:\.\d+)?)(?:\s+.*)?$"
+    # Residue numbers >= 1000 touch the name ("ASP1014 D"), so allow no space.
+    r"^\s*(ASP|GLU|HIS|LYS|ARG|CYS|TYR|N\+|C-)\s*(-?\d+)\s+(\S+)\s+(-?\d+(?:\.\d+)?)(?:\s+.*)?$"
 )
 
 
