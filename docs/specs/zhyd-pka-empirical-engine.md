@@ -44,6 +44,24 @@ output only (see [Clean-room protocol](#clean-room-protocol)).
 This is a process separation to keep the MIT engine an independent
 implementation of a published model. It is not legal advice.
 
+### Other sources
+
+Papers and implementations beyond PROPKA may be used freely for ideas and
+for zhyd-mode improvements, according to their licenses:
+
+| Source | License | Use |
+|---|---|---|
+| Papers (any method) | — | ideas, equations, parameters with citation |
+| pKAI (Reis et al. 2022), [repo](https://github.com/bayer-science-for-a-better-life/pKAI) | MIT | code may be adapted with attribution |
+| PDB2PQR / APBS | BSD-3-Clause (recent releases; check the LICENSE of the version read) | code may be adapted with attribution |
+| PyMCCE | MIT | code may be adapted with attribution |
+| PypKa | LGPL-3.0 (DelPhi backend proprietary) | papers / black-box oracle only, like PROPKA |
+| MCCE4 | not confirmed | read its LICENSE before looking at code |
+
+Copyleft or unlicensed code is treated like PROPKA: papers and black-box
+output only. Adapted permissive code keeps its copyright notice in the
+source file and is listed in the revision log.
+
 ## Scope
 
 **In scope (r1):** proteins, one model at a time.
@@ -463,3 +481,4 @@ Gates, in order:
 | Rev | Date | Change |
 |---|---|---|
 | r1 | 2026-11-06 | Initial protein-only specification |
+| r1.1 | 2026-11-06 | Allow other papers and permissively licensed implementations |
