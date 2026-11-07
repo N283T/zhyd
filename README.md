@@ -154,8 +154,10 @@ reimplementation of the PROPKA 3 protein model, written from
 every build; on protein-only PKAD-R structures 99.84 % of its sites are
 within 0.02 of PROPKA (ligand and nucleic-acid groups are not modelled yet).
 `--empirical-mode zhyd` turns on the corrections of PROPKA's model quirks
-adopted so far (`zhyd-empirical-v1`, experimental and unvalidated);
-`--empirical-fixes` selects corrections one by one.
+and a CYS/TYR recalibration (`zhyd-empirical-v1.1`, experimental and
+unvalidated; PKAD-R test MAE 0.71 against 1.17 for parity);
+`--empirical-fixes` selects corrections one by one and `--parameters`
+overrides per-site model pKa and desolvation scale in zhyd mode.
 `--engine builtin` selects the experimental built-in model below.
 
 The built-in parameter set, `zhyd-pka-protein-v0.2`, was fitted on a

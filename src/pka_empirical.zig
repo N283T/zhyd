@@ -27,15 +27,16 @@ pub const zhyd_engine_name = "zhyd-empirical (zhyd)";
 pub const parameter_version = params.parity_version;
 pub const Fixes = params.Fixes;
 
-/// Corrections enabled by zhyd mode, adopted on the PKAD-R train split (see
-/// the specification's "zhyd mode evaluation protocol" and "zhyd mode
-/// ablation"). Q2 and Q4 raised the train MAE and are not adopted.
-pub const zhyd_fixes: Fixes = .{ .q1 = true, .q3 = true, .q5 = true, .q6 = true, .q7 = true, .q8 = true };
+/// Corrections enabled by zhyd mode: Q1–Q8, adopted on the PKAD-R train
+/// split under the r4 protocol (see the specification's "zhyd mode
+/// evaluation protocol" and "zhyd mode ablation").
+pub const zhyd_fixes: Fixes = .{ .q1 = true, .q2 = true, .q3 = true, .q4 = true, .q5 = true, .q6 = true, .q7 = true, .q8 = true };
 
 pub const Mode = enum {
     /// Reproduce the PROPKA 3 model, quirks included.
     parity,
-    /// Parity model with the adopted corrections (`zhyd_fixes`).
+    /// Adopted corrections (`zhyd_fixes`) on the recalibrated parameter
+    /// table (`params.calibrated`).
     zhyd,
 
     pub fn defaultFixes(self: Mode) Fixes {
@@ -53,17 +54,32 @@ pub const Options = struct {
     /// zreduce N-terminal policy; under `aggressive` chain breaks create
     /// termini for Q3 and Q4.
     nterm_mode: NtermMode = .auto,
-    parameters: params.Parameters = .{},
+    /// Per-kind model pKa / desolvation scale overrides (`--parameters`,
+    /// zhyd mode only), applied on top of the mode's parameter table.
+    overrides: ?params.Overrides = null,
 
     pub fn effectiveFixes(self: Options) Fixes {
         return self.fixes orelse self.mode.defaultFixes();
     }
-};
 
-/// Engine name reported for a correction set: parity only when none is on.
-pub fn engineName(fixes: Fixes) []const u8 {
-    return if (fixes.isNone()) parity_engine_name else zhyd_engine_name;
-}
+    /// Full parameter set: the mode's table (parity table in parity mode,
+    /// recalibrated table in zhyd mode), the correction set and overrides.
+    pub fn parameters(self: Options) params.Parameters {
+        const fixes = self.effectiveFixes();
+        var p: params.Parameters = if (self.mode == .zhyd) params.calibrated else .{};
+        p.fixes = fixes;
+        p.break_termini = self.nterm_mode.treatsBreakAsNterm();
+        p.version = params.versionFor(fixes, zhyd_fixes, self.mode == .zhyd);
+        if (self.overrides) |o| p = o.applyTo(p);
+        return p;
+    }
+
+    /// Engine name: parity only for the unmodified parity model.
+    pub fn engineName(self: Options) []const u8 {
+        const parity = self.mode == .parity and self.effectiveFixes().isNone() and self.overrides == null;
+        return if (parity) parity_engine_name else zhyd_engine_name;
+    }
+};
 
 pub fn isEngineName(name: []const u8) bool {
     return std.mem.eql(u8, name, parity_engine_name) or std.mem.eql(u8, name, zhyd_engine_name);
@@ -73,11 +89,8 @@ const Model = model_mod.Model;
 const NtermMode = @import("place/terminal.zig").NtermMode;
 
 pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, options: Options) !pka.Prediction {
-    const fixes = options.effectiveFixes();
-    var parameters = options.parameters;
-    parameters.fixes = fixes;
-    parameters.break_termini = options.nterm_mode.treatsBreakAsNterm();
-    parameters.version = params.versionFor(fixes, zhyd_fixes);
+    const parameters = options.parameters();
+    const fixes = parameters.fixes;
     const sums = try engine.run(allocator, mdl, parameters);
     defer allocator.free(sums);
 
@@ -106,7 +119,7 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, options: Options
             .kind = s.kind,
             .center = s.center.cast(f32),
             .terms = .{
-                .model = @floatCast(params.modelPka(s.kind)),
+                .model = @floatCast(parameters.model_pka.get(s.kind)),
                 .burial = @floatCast(s.burial),
                 .hydrogen_bond = @floatCast(s.hydrogen_bond),
                 .electrostatic = @floatCast(s.electrostatic),
@@ -126,7 +139,7 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, options: Options
         .excluded = try excluded.toOwnedSlice(allocator),
         .omitted_sites = omitted,
         .parameter_version = parameters.version,
-        .engine = engineName(fixes),
+        .engine = options.engineName(),
     };
 }
 
@@ -175,8 +188,10 @@ test "zhyd mode names its engine and correction set" {
     const cases = [_]Case{
         .{ .options = .{}, .engine = parity_engine_name, .version = params.parity_version },
         .{ .options = .{ .mode = .zhyd }, .engine = zhyd_engine_name, .version = params.zhyd_version },
-        .{ .options = .{ .mode = .zhyd, .fixes = .none }, .engine = parity_engine_name, .version = params.parity_version },
+        .{ .options = .{ .mode = .zhyd, .fixes = .none }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1.1+none" },
+        .{ .options = .{ .fixes = zhyd_fixes }, .engine = zhyd_engine_name, .version = params.zhyd_v1_version },
         .{ .options = .{ .fixes = .{ .q2 = true, .q7 = true } }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1+Q2+Q7" },
+        .{ .options = .{ .mode = .zhyd, .overrides = .{ .version = "my-fit" } }, .engine = zhyd_engine_name, .version = "my-fit" },
     };
     for (cases) |c| {
         var result = try predict(testing.allocator, &mdl, c.options);
@@ -184,4 +199,27 @@ test "zhyd mode names its engine and correction set" {
         try testing.expectEqualStrings(c.engine, result.engine);
         try testing.expectEqualStrings(c.version, result.parameter_version);
     }
+}
+
+test "overrides change the model pKa and scale the desolvation shift" {
+    const mmcif = @import("mmcif.zig");
+    var mdl = try mmcif.parseModel(testing.allocator, @embedFile("test_data/his.cif"));
+    defer mdl.deinit();
+    for (mdl.residues.items) |*res| res.entity_type = .polymer;
+    var base = try predict(testing.allocator, &mdl, .{ .mode = .zhyd });
+    defer base.deinit();
+    // N-terminus: model 8.00 → 7.00; desolvation × 0.5. The site has no
+    // pair partner here (the HIS is covalently coupled out), so the total
+    // moves by exactly −1 + desolvation / 2.
+    var o = params.Overrides{ .version = "test" };
+    o.model_pka.N_TERM = 7.0;
+    o.desolvation_scale.N_TERM = 0.5;
+    var fit = try predict(testing.allocator, &mdl, .{ .mode = .zhyd, .overrides = o });
+    defer fit.deinit();
+    try testing.expectEqual(pka.SiteKind.n_term, base.sites[0].kind);
+    const b = base.sites[0];
+    const f = fit.sites[0];
+    try testing.expectApproxEqAbs(@as(f32, 7.0), f.terms.model, 1e-6);
+    try testing.expectApproxEqAbs(b.terms.burial * 0.5, f.terms.burial, 1e-5);
+    try testing.expectApproxEqAbs(b.predicted_pka - 1.0 - b.terms.burial * 0.5, f.predicted_pka, 1e-5);
 }

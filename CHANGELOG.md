@@ -42,11 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with PROPKA used only as a black-box oracle; 99.84 % of 19,598 protein
   sites on 185 PKAD-R structures within 0.02 of PROPKA (spec r2 records the
   inferred rules and remaining deviations)
-- zhyd mode of the empirical engine (`--empirical-mode zhyd`, version
-  `zhyd-empirical-v1`): corrections Q1–Q8 of the parity quirks, each behind
-  its own switch (`--empirical-fixes Q1,..|none` for ablation); adopted on
-  the PKAD-R train split: Q1, Q3, Q5–Q8 (spec r3 has the ablation table).
-  Parity remains the default and its output is unchanged
+- zhyd mode of the empirical engine (`--empirical-mode zhyd`): corrections
+  Q1–Q8 of the parity quirks, each behind its own switch
+  (`--empirical-fixes Q1,..|none` for ablation), all adopted (spec r4), and
+  a recalibrated table `zhyd-empirical-v1.1` (CYS and TYR model pKa and
+  desolvation scale, fitted on the PKAD-R train split with
+  leave-one-cluster-out CV; test MAE 1.170 → 0.712). Parity remains the
+  default and its output is unchanged
+- `zreduce pka --engine empirical --empirical-mode zhyd --parameters PATH`:
+  per-site model pKa and desolvation scale overrides (JSON with its own
+  version; unknown keys rejected)
+- `scripts/pka/calibrate_empirical.py`: grid fit with leave-one-cluster-out
+  CV for one site kind of the empirical engine
 - `pkadr.py predict --extra-arg ARG` (repeatable) passes extra options to
   `zreduce pka`
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)

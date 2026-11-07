@@ -735,6 +735,11 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
         }
     }
 
+    // Model pKa from the parameter table (built-in or overridden).
+    for (conf.groups.items) |*g| {
+        if (g.kind) |k| g.model_pka = params.model_pka.get(k);
+    }
+
     std.mem.sort(Group, conf.groups.items, &conf, groupOrderLess);
     return conf;
 }

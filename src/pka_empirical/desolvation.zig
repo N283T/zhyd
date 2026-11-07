@@ -55,14 +55,16 @@ pub fn shift(q: f64, volume: f64, w: f64, params: Parameters) f64 {
     return q * params.desolv_prefactor * @max(0.0, volume - params.desolv_volume_offset) * s;
 }
 
-/// Fill count, weight and desolvation of every titratable group and ion.
+/// Fill count, weight and desolvation of every titratable group and ion. The
+/// desolvation shift is multiplied by the site kind's scale factor (1.0
+/// unless overridden).
 pub fn apply(conf: *sites.Conformation, params: Parameters) void {
     for (conf.groups.items) |*g| {
         if (!(g.isTitratable() or g.gtype == .ion)) continue;
         const b = burial(conf, g.group_atom, g.center, params);
         g.count = b.count;
         g.weight = weight(b.count, params);
-        if (g.isTitratable()) g.desolvation = shift(g.q, b.volume, g.weight, params);
+        if (g.isTitratable()) g.desolvation = shift(g.q, b.volume, g.weight, params) * params.desolvation_scale.get(g.kind.?);
     }
 }
 

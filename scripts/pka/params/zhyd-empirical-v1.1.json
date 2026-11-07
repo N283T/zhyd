@@ -1,0 +1,266 @@
+{
+  "parameters": {
+    "version": "zhyd-empirical-v1.1",
+    "model_pka": {
+      "CYS": 8.0,
+      "TYR": 10.5
+    },
+    "desolvation_scale": {
+      "CYS": 0.2,
+      "TYR": 0.2
+    }
+  },
+  "note": "Values are built into zreduce (src/pka_empirical/params.zig, 'calibrated') and used by 'zreduce pka --engine empirical --empirical-mode zhyd'; this file records the fit. Corrections: Q1-Q8. All other parameters are the parity table's.",
+  "fit": {
+    "method": "exhaustive grid per site kind, CYS first, then TYR with CYS fixed (scripts/pka/calibrate_empirical.py)",
+    "objective": "train_split_mae",
+    "selection": "lowest leave-one-cluster-out (cluster_id) CV MAE over the train split among: default, model pKa only, desolvation scale only, both",
+    "seed": "zhyd-pka-split-v1",
+    "train_fraction": 0.8,
+    "train_rows": 668,
+    "train_clusters": 65,
+    "bounds": {
+      "model_pka": "default +/- 1.5, step 0.1",
+      "desolvation_scale": "0.2-1.5, step 0.05"
+    },
+    "CYS": {
+      "kind_rows": 48,
+      "selected": "both",
+      "variants": {
+        "default": {
+          "model_pka": 9.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.8514,
+          "train_mae_kind": 3.8401,
+          "cv_mae": 0.8514,
+          "cv_mae_kind": 3.8401
+        },
+        "model_pka": {
+          "model_pka": 7.5,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.811,
+          "train_mae_kind": 2.8207,
+          "cv_mae": 0.811,
+          "cv_mae_kind": 2.8207
+        },
+        "desolvation_scale": {
+          "model_pka": 9.0,
+          "desolvation_scale": 0.2,
+          "train_mae": 0.7794,
+          "train_mae_kind": 2.1461,
+          "cv_mae": 0.7794,
+          "cv_mae_kind": 2.1461
+        },
+        "both": {
+          "model_pka": 8.0,
+          "desolvation_scale": 0.2,
+          "train_mae": 0.7635,
+          "train_mae_kind": 1.7508,
+          "cv_mae": 0.7771,
+          "cv_mae_kind": 2.0941
+        }
+      }
+    },
+    "TYR": {
+      "kind_rows": 21,
+      "selected": "both",
+      "variants": {
+        "default": {
+          "model_pka": 10.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7635,
+          "train_mae_kind": 1.7911,
+          "cv_mae": 0.7635,
+          "cv_mae_kind": 1.7911
+        },
+        "model_pka": {
+          "model_pka": 9.8,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7634,
+          "train_mae_kind": 1.8022,
+          "cv_mae": 0.7705,
+          "cv_mae_kind": 2.0024
+        },
+        "desolvation_scale": {
+          "model_pka": 10.0,
+          "desolvation_scale": 0.3,
+          "train_mae": 0.7505,
+          "train_mae_kind": 1.3459,
+          "cv_mae": 0.763,
+          "cv_mae_kind": 1.63
+        },
+        "both": {
+          "model_pka": 10.5,
+          "desolvation_scale": 0.2,
+          "train_mae": 0.7451,
+          "train_mae_kind": 1.1899,
+          "cv_mae": 0.747,
+          "cv_mae_kind": 1.2496
+        }
+      },
+      "fixed": {
+        "model_pka": {
+          "CYS": 8.0
+        },
+        "desolvation_scale": {
+          "CYS": 0.2
+        }
+      }
+    },
+    "at_bound": [
+      "CYS desolvation_scale",
+      "TYR desolvation_scale"
+    ]
+  },
+  "data": {
+    "source": "PKAD-R standalone file PKAD-R-250211.json (https://compbio.clemson.edu/pkad-r/)",
+    "citation": "Chen et al., J. Comput. Biophys. Chem. (2025), doi:10.1142/S2737416525500164",
+    "sha256": "9ee3cfb885306ca944e177c9b21fa700dd19b8cc985e4bdb08f42513ae269937",
+    "downloaded": "2026-11-05",
+    "structures": "RCSB mmCIF fetched 2026-11-05 by scripts/pka/pkadr.py fetch (model 1)",
+    "normalization": "scripts/pka/pkadr.py normalize: numeric pKa only, PDB-mapped, SNase as stress holdout",
+    "cluster_definition": "union of PDB id, PKAD-R 'Sequence_Identity_>_30%' and 'Alternative_PDBs' links, and identical protein name",
+    "canonical_csv_sha256": "81dd3f03f21c557168f095658049463245ff0628c9fd1f70470868bdfeb62383",
+    "structures_manifest_sha256": "4c160ff35feef92d37f24a465c8ba6b39962a7b885110e54980553c8980fe4fe"
+  },
+  "held_out_results": {
+    "selection_rule": "train-split and train CV only, fixed before inspecting test or stress rows",
+    "null_model_parity_values": {
+      "train": 0.766,
+      "test": 0.883,
+      "stress:snase": 1.957
+    },
+    "zhyd-empirical-v1-parity": {
+      "stress:snase": {
+        "mae": 0.924,
+        "n": 102,
+        "rmse": 1.196,
+        "shift_direction_accuracy": 0.806,
+        "residue_mae": {
+          "ASP": 1.194,
+          "GLU": 0.893,
+          "HIS": 0.635,
+          "LYS": 0.998
+        }
+      },
+      "test": {
+        "mae": 1.17,
+        "n": 133,
+        "rmse": 4.46,
+        "shift_direction_accuracy": 0.688,
+        "residue_mae": {
+          "ASP": 0.651,
+          "CYS": 9.807,
+          "C_TERM": 0.564,
+          "GLU": 0.735,
+          "HIS": 0.725,
+          "N_TERM": 0.483
+        }
+      },
+      "train": {
+        "mae": 0.851,
+        "n": 630,
+        "rmse": 1.403,
+        "shift_direction_accuracy": 0.61,
+        "residue_mae": {
+          "ASP": 0.672,
+          "CYS": 3.84,
+          "C_TERM": 0.378,
+          "GLU": 0.567,
+          "HIS": 0.969,
+          "LYS": 0.548,
+          "N_TERM": 0.562,
+          "TYR": 1.791
+        }
+      }
+    },
+    "zhyd-empirical-v1": {
+      "stress:snase": {
+        "mae": 0.924,
+        "n": 102,
+        "rmse": 1.196,
+        "shift_direction_accuracy": 0.806,
+        "residue_mae": {
+          "ASP": 1.194,
+          "GLU": 0.893,
+          "HIS": 0.635,
+          "LYS": 0.998
+        }
+      },
+      "test": {
+        "mae": 0.816,
+        "n": 133,
+        "rmse": 1.242,
+        "shift_direction_accuracy": 0.696,
+        "residue_mae": {
+          "ASP": 0.651,
+          "CYS": 3.088,
+          "C_TERM": 0.564,
+          "GLU": 0.735,
+          "HIS": 0.718,
+          "N_TERM": 0.483
+        }
+      },
+      "train": {
+        "mae": 0.851,
+        "n": 630,
+        "rmse": 1.403,
+        "shift_direction_accuracy": 0.61,
+        "residue_mae": {
+          "ASP": 0.671,
+          "CYS": 3.84,
+          "C_TERM": 0.399,
+          "GLU": 0.569,
+          "HIS": 0.968,
+          "LYS": 0.548,
+          "N_TERM": 0.563,
+          "TYR": 1.791
+        }
+      }
+    },
+    "zhyd-empirical-v1.1": {
+      "stress:snase": {
+        "mae": 0.924,
+        "n": 102,
+        "rmse": 1.196,
+        "shift_direction_accuracy": 0.806,
+        "residue_mae": {
+          "ASP": 1.194,
+          "GLU": 0.893,
+          "HIS": 0.635,
+          "LYS": 0.998
+        }
+      },
+      "test": {
+        "mae": 0.712,
+        "n": 133,
+        "rmse": 1.018,
+        "shift_direction_accuracy": 0.723,
+        "residue_mae": {
+          "ASP": 0.644,
+          "CYS": 1.163,
+          "C_TERM": 0.564,
+          "GLU": 0.735,
+          "HIS": 0.718,
+          "N_TERM": 0.483
+        }
+      },
+      "train": {
+        "mae": 0.745,
+        "n": 630,
+        "rmse": 1.065,
+        "shift_direction_accuracy": 0.626,
+        "residue_mae": {
+          "ASP": 0.671,
+          "CYS": 1.751,
+          "C_TERM": 0.399,
+          "GLU": 0.569,
+          "HIS": 0.947,
+          "LYS": 0.559,
+          "N_TERM": 0.563,
+          "TYR": 1.19
+        }
+      }
+    }
+  }
+}

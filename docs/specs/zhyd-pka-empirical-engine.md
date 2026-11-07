@@ -1,9 +1,11 @@
 # zhyd empirical pKa engine — specification
 
-Status: draft r3 (2026-11-07); parity mode implemented and accepted with
+Status: draft r4 (2026-11-07); parity mode implemented and accepted with
 documented deviations (see [Parity status](#parity-status-r2)); zhyd mode
-corrections Q1–Q8 implemented and measured (see
-[zhyd mode ablation](#zhyd-mode-ablation-r3)); CYS recalibration pending. Target: an MIT-licensed protein pKa engine in
+corrections Q1–Q8 implemented, measured and adopted (see
+[zhyd mode ablation](#zhyd-mode-ablation-r3)); recalibrated table
+`zhyd-empirical-v1.1` (see [Recalibration](#recalibration-r4)). Target: an
+MIT-licensed protein pKa engine in
 zreduce that first reproduces the PROPKA 3 empirical model ("parity mode") and
 then improves on it ("zhyd mode").
 
@@ -565,6 +567,12 @@ the test split and the SNase stress set are only reported, never used for
 the decision. Corrections that change nothing on PKAD-R are still adopted
 when they are physically motivated (Q1, Q4, Q5) and documented as such.
 
+*Amendment (r4):* a physically motivated correction whose effect on the
+train MAE lies within ±0.002 is adopted, with the reason recorded next to
+the ablation. Such an effect is below the resolution of a 630-site train
+split, and the correction is then chosen on physical grounds rather than
+on noise. The per-residue limit (+0.05) still applies.
+
 Baseline on PKAD-R (2026-11-07, 865 matched sites, `_entity` fix applied):
 
 | Engine | train MAE | test MAE | SNase MAE | null train / test |
@@ -597,7 +605,8 @@ four decimals to show changes below 0.001.
 | Q7 | 0.8513 | 0.8165 | 0.9242 | 4 | none |
 | Q8 | 0.8513 | 1.1701 | 0.9242 | 1 | none |
 | all Q1–Q8 | 0.8514 | 0.8160 | 0.9240 | 451 (+152 / −19) | as Q2 + Q3 + Q4 |
-| **adopted** (Q1, Q3, Q5–Q8) | **0.8504** | **0.8165** | **0.9242** | 365 (+152) | C_TERM +0.021, ASP −0.0015, HIS −0.0008 |
+| r3 adopted (Q1, Q3, Q5–Q8) | 0.8504 | 0.8165 | 0.9242 | 365 (+152) | C_TERM +0.021, ASP −0.0015, HIS −0.0008 |
+| **r4 adopted = zhyd v1** (Q1–Q8) | **0.8514** | **0.8160** | **0.9240** | 451 (+152 / −19) | C_TERM +0.021, GLU +0.0018, N_TERM +0.001, ASP −0.001, HIS −0.0008 |
 
 Notes:
 
@@ -622,14 +631,87 @@ Notes:
   (1PPF A186B ARG, which no longer shares the value of A186). Q5 finds no
   monatomic metal outside the parity ion table on PKAD-R.
 
-**Adopted set: Q1, Q3, Q5, Q6, Q7, Q8.** Q3 lowers the train MAE without a
+**Adopted set (r4): Q1–Q8.** Q3 lowers the train MAE without a
 per-residue regression above 0.05. Q1, Q5, Q6, Q7 and Q8 leave the train
 split unchanged and are physically motivated (Q7 removes non-physical
 averages; Q1, Q8 remove insertion-code artefacts; Q5 makes ions independent
-of residue naming; Q6 is a no-op). Q2 and Q4 raise the train MAE (by 0.0001
-and 0.0009) and are **not adopted**, although both are physically
-motivated; they stay available as switches and should be re-measured after
-CYS recalibration, when larger effects no longer mask them.
+of residue naming; Q6 is a no-op).
+
+Q2 and Q4 raise the train MAE by 0.0001 and 0.0009 and were not adopted in
+r3. Under the r4 amendment (effect within ±0.002) both are adopted:
+
+- Q2: an H-bond whose hydrogen points away from the acceptor
+  (cos < 0) is not an H-bond; the parity value is an artefact of taking
+  |Δ · f · F_angle|. The effect is 58 sites and +0.0001 train MAE.
+- Q4: every N-terminus it removes is on a chain that begins with a cap or a
+  modified residue: ACE in 1A93, 1FMH, 1HRC, 1PRW, 1U2U and 2ZTA, PCA
+  (pyroglutamate) in 1QH7 and 2BUS, FME (N-formylmethionine) in six chains
+  of 3WU2. None of these chains has a free α-amine in the deposited
+  structure, so the parity N-terminus is a spurious +1 charge. The train
+  MAE rises by 0.0009 (GLU +0.0017, N_TERM +0.001), within ±0.002.
+
+### Recalibration (r4)
+
+zhyd mode uses a recalibrated parameter table, `zhyd-empirical-v1.1`. It
+differs from the parity table in two parameters of two site kinds; every
+other value is unchanged.
+
+| Kind | Model pKa (parity → v1.1) | Desolvation scale (parity → v1.1) |
+|---|---|---|
+| CYS | 9.00 → 8.00 | 1.0 → 0.2 |
+| TYR | 10.00 → 10.50 | 1.0 → 0.2 |
+
+The desolvation scale multiplies the kind's desolvation shift
+ΔpKa_desolv ([Desolvation](#desolvation)); the burial weight w and the
+pair weights that use the atom count N are not scaled.
+
+**Fit.** `scripts/pka/calibrate_empirical.py`, train split only (668 train
+rows, 630 matched, 65 clusters), corrections Q1–Q8 on. Exhaustive grid per
+kind: model pKa within ±1.5 of the parity value in steps of 0.1, scale
+0.2–1.5 in steps of 0.05. Objective: train MAE over all matched train rows
+(the fitted kind changes other sites through pair terms). CYS was fitted
+first; TYR was then fitted with the CYS values fixed. Four variants were
+compared by leave-one-cluster-out cross-validation (refit without the
+cluster, predict its rows; pooled MAE over all train rows); the variant
+with the lowest CV MAE is adopted, so a parameter is kept only if it
+improves CV MAE. Fit record: `scripts/pka/params/zhyd-empirical-v1.1.json`.
+
+| Kind (train rows) | Variant | Fitted values | train MAE | CV MAE | kind train / CV MAE |
+|---|---|---|---|---|---|
+| CYS (25) | default | 9.0, 1.0 | 0.8514 | 0.8514 | 3.840 / 3.840 |
+| | model pKa only | 7.5, 1.0 | 0.8110 | 0.8110 | 2.821 / 2.821 |
+| | scale only | 9.0, 0.2 | 0.7794 | 0.7794 | 2.146 / 2.146 |
+| | **both** | **8.0, 0.2** | 0.7635 | **0.7771** | 1.751 / 2.094 |
+| TYR (21) | default | 10.0, 1.0 | 0.7635 | 0.7635 | 1.791 / 1.791 |
+| | model pKa only | 9.8, 1.0 | 0.7634 | 0.7705 | 1.802 / 2.002 |
+| | scale only | 10.0, 0.3 | 0.7505 | 0.7630 | 1.346 / 1.630 |
+| | **both** | **10.5, 0.2** | 0.7451 | **0.7470** | 1.190 / 1.250 |
+
+The CYS fit is stable across folds (58 of 65 folds choose 8.0, 0.2), and so
+is the TYR fit (62 of 65 choose 10.5, 0.2). Both desolvation scales sit at
+the lower bound 0.2: on PKAD-R the parity desolvation term overestimates
+the shift of buried thiols and phenols by about a factor of five. Because
+the minimum lies at the bound, the unconstrained optimum may be lower; the
+bound was fixed before the fit and is kept.
+For TYR the model pKa alone raises the CV MAE; it is kept only together
+with the scale, where it lowers the CV MAE (0.7470 vs 0.7630 for the scale
+alone).
+
+**Results** (PKAD-R, model 1; per-residue MAE):
+
+| Set | train | test | SNase | train per residue | test per residue |
+|---|---|---|---|---|---|
+| parity | 0.851 | 1.170 | 0.924 | ASP 0.672, CYS 3.840, C_TERM 0.378, GLU 0.567, HIS 0.969, LYS 0.548, N_TERM 0.562, TYR 1.791 | ASP 0.651, CYS 9.807, C_TERM 0.564, GLU 0.735, HIS 0.725, N_TERM 0.483 |
+| zhyd v1 (Q1–Q8) | 0.851 | 0.816 | 0.924 | ASP 0.671, CYS 3.840, C_TERM 0.399, GLU 0.569, HIS 0.968, LYS 0.548, N_TERM 0.563, TYR 1.791 | ASP 0.651, CYS 3.088, C_TERM 0.564, GLU 0.735, HIS 0.718, N_TERM 0.483 |
+| zhyd v1.1 (Q1–Q8 + recalibration) | 0.745 | 0.712 | 0.924 | ASP 0.671, CYS 1.751, C_TERM 0.399, GLU 0.569, HIS 0.947, LYS 0.559, N_TERM 0.563, TYR 1.190 | ASP 0.644, CYS 1.163, C_TERM 0.564, GLU 0.735, HIS 0.718, N_TERM 0.483 |
+
+Null model (parity model pKa values): train 0.766, test 0.883, SNase 1.957.
+`evaluate.py` takes the null model from each report's model term, so for
+v1.1 it reports 0.745 / 0.830 / 1.957; the fixed parity values are the
+meaningful reference. v1.1 is below the null model and below `propka`
+(1.174) and `builtin` v0.2 (0.802) on the test split; SNase has no CYS or
+TYR sites and is unchanged. LYS train MAE rises by 0.011 through TYR–LYS
+pair terms.
 
 ## Implementation layout
 
@@ -639,17 +721,33 @@ CYS recalibration, when larger effects no longer mask them.
 - Engine option `mode: parity | zhyd` and an optional correction set
   (`Fixes`, one switch per Qn) overriding the mode's set; parameter tables
   as one versioned struct.
-- Versions: `zhyd-empirical-v1-parity` when no correction is on,
-  `zhyd-empirical-v1` for the adopted set, otherwise `zhyd-empirical-v1`
-  followed by `+Qn` for every enabled correction (e.g.
-  `zhyd-empirical-v1+Q2+Q7`). Engine name `zhyd-empirical (parity)` with
-  report status `experimental_parity_with_propka3_model` when no correction
-  is on, else `zhyd-empirical (zhyd)` with status
-  `experimental_unvalidated`.
+- Parameter tables (r4): parity mode uses the parity table; zhyd mode the
+  recalibrated table (see [Recalibration](#recalibration-r4)).
+  `--empirical-fixes` changes only the correction set, never the table.
+- Versions (r4): on the parity table, `zhyd-empirical-v1-parity` when no
+  correction is on, `zhyd-empirical-v1` for the adopted set (Q1–Q8),
+  otherwise `zhyd-empirical-v1` followed by `+Qn` for every enabled
+  correction (e.g. `zhyd-empirical-v1+Q2+Q7`). On the recalibrated table,
+  `zhyd-empirical-v1.1` for the adopted set, otherwise
+  `zhyd-empirical-v1.1+Qn…` (`zhyd-empirical-v1.1+none` without
+  corrections). A parameter override file reports its own version. Engine
+  name `zhyd-empirical (parity)` with report status
+  `experimental_parity_with_propka3_model` only for the unmodified parity
+  model (parity table, no correction, no override), else
+  `zhyd-empirical (zhyd)` with status `experimental_unvalidated`.
+- Parameter overrides (r4), zhyd mode only: `--parameters PATH` reads a JSON
+  object with a required `"version"` (not a built-in label, not starting
+  with `zhyd-empirical-v1`) and two optional objects, `"model_pka"` and
+  `"desolvation_scale"`, each mapping a site name (`ASP`, `GLU`, `HIS`,
+  `LYS`, `ARG`, `CYS`, `TYR`, `N_TERM`, `C_TERM`) to a number. Model pKa
+  values replace the table value (range −5..20); a desolvation scale
+  multiplies that kind's desolvation shift (range 0..10, default 1.0).
+  Unknown keys are an error. Overrides apply on top of the mode's table.
 - CLI: `zreduce pka --engine empirical [--empirical-mode parity|zhyd]
-  [--empirical-fixes Q1,..|none]` (default parity; both options are
-  rejected for other engines). When it meets the acceptance gates it
-  replaces the current `builtin` (v0.2) engine.
+  [--empirical-fixes Q1,..|none] [--parameters PATH]` (default parity; the
+  mode and fix options are rejected for other engines, `--parameters` in
+  parity mode). When it meets the acceptance gates it replaces the current
+  `builtin` (v0.2) engine.
 
 ## Validation
 
@@ -714,3 +812,4 @@ and further work is judged by G2. Unexplained deviations:
 | r1.1 | 2026-11-06 | Allow other papers and permissively licensed implementations |
 | r2 | 2026-11-07 | Amendments from the first parity implementation (black-box oracle probes): distance-based bonds and carboxyl atoms, covalent coupling, conformation refinements (uneven alternates, not-titrating averaging, insertion codes, shared identities), planar-pair and bisector H rules, COO–ARG neighbour rule, N-terminus details; Q7 reworded; parity status and deviations D1–D7 |
 | r3 | 2026-11-07 | zhyd mode: Q8 (insertion-code artefacts) added; precise rules for Q1–Q8; Q6 recorded as a no-op of the parity input; evaluation protocol and ablation on PKAD-R; adopted set Q1, Q3, Q5–Q8 (Q2, Q4 not adopted); version and engine naming of correction sets |
+| r4 | 2026-11-07 | Protocol amendment (adopt physically motivated corrections with train-MAE effect within ±0.002); Q2 and Q4 adopted, zhyd v1 = Q1–Q8; per-kind model pKa and desolvation scale parameters with zhyd-mode override files; recalibrated table `zhyd-empirical-v1.1` (CYS and TYR, train split, leave-one-cluster-out CV); new version scheme |

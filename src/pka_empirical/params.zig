@@ -9,8 +9,10 @@ const pka = @import("../pka.zig");
 const AtomType = @import("../element.zig").AtomType;
 
 pub const parity_version = "zhyd-empirical-v1-parity";
-/// Version of zhyd mode with the adopted correction set.
-pub const zhyd_version = "zhyd-empirical-v1";
+/// All adopted corrections (Q1–Q8) on the parity parameter table.
+pub const zhyd_v1_version = "zhyd-empirical-v1";
+/// All adopted corrections on the recalibrated table (`calibrated`).
+pub const zhyd_version = "zhyd-empirical-v1.1";
 
 /// zhyd-mode corrections of the parity quirks ("Known parity quirks"), one
 /// switch each. All off reproduces parity mode exactly.
@@ -66,28 +68,133 @@ pub const Fixes = packed struct(u8) {
     }
 };
 
-/// "zhyd-empirical-v1" followed by "+Qn" for every enabled correction, for
-/// every possible correction set (index: `Fixes.bits()`).
-const custom_versions: [256][]const u8 = blk: {
+/// `base` followed by "+Qn" for every enabled correction ("+none" for the
+/// empty set), for every possible correction set (index: `Fixes.bits()`).
+fn customVersions(comptime base: []const u8) [256][]const u8 {
     @setEvalBranchQuota(100_000);
     var table: [256][]const u8 = undefined;
     for (0..256) |i| {
-        var v: []const u8 = zhyd_version;
+        var v: []const u8 = base;
         for (Fixes.names, 0..) |n, k| {
             if ((i >> k) & 1 == 1) v = v ++ "+" ++ n;
         }
-        table[i] = v;
+        table[i] = if (i == 0) base ++ "+none" else v;
     }
-    break :blk table;
+    return table;
+}
+
+const v1_versions = customVersions(zhyd_v1_version);
+const v1_1_versions = customVersions(zhyd_version);
+
+/// Parameter version of a correction set on the parity table
+/// (`calibrated` false) or the recalibrated table. Parity table: parity for
+/// no correction, "zhyd-empirical-v1" for the adopted set, otherwise
+/// "zhyd-empirical-v1" with the enabled corrections appended (e.g.
+/// "zhyd-empirical-v1+Q2+Q7"). Recalibrated table: "zhyd-empirical-v1.1"
+/// for the adopted set, otherwise "zhyd-empirical-v1.1+..." ("+none" for
+/// no correction).
+pub fn versionFor(fixes: Fixes, adopted: Fixes, is_calibrated: bool) []const u8 {
+    if (is_calibrated) {
+        if (fixes.bits() == adopted.bits()) return zhyd_version;
+        return v1_1_versions[fixes.bits()];
+    }
+    if (fixes.isNone()) return parity_version;
+    if (fixes.bits() == adopted.bits()) return zhyd_v1_version;
+    return v1_versions[fixes.bits()];
+}
+
+/// Per-site-kind parameter values.
+pub const KindTable = std.enums.EnumArray(pka.SiteKind, f64);
+
+/// Model pKa values of the parity table ("Model values and charges").
+pub const default_model_pka = KindTable.init(.{
+    .asp = 3.80,
+    .glu = 4.50,
+    .his = 6.50,
+    .lys = 10.50,
+    .arg = 12.50,
+    .cys = 9.00,
+    .tyr = 10.00,
+    .n_term = 8.00,
+    .c_term = 3.20,
+});
+
+/// Recalibrated zhyd table (`zhyd-empirical-v1.1`): CYS and TYR model pKa
+/// and desolvation scale, fitted on the PKAD-R train split and kept because
+/// they lower the leave-one-cluster-out CV MAE (spec "Recalibration (r4)";
+/// fit record scripts/pka/params/zhyd-empirical-v1.1.json). Every other
+/// value is the parity table's.
+pub const calibrated: Parameters = blk: {
+    var p = Parameters{ .version = zhyd_version };
+    p.model_pka.set(.cys, 8.0);
+    p.model_pka.set(.tyr, 10.5);
+    p.desolvation_scale.set(.cys, 0.2);
+    p.desolvation_scale.set(.tyr, 0.2);
+    break :blk p;
 };
 
-/// Parameter version of a correction set: parity for none, the zhyd version
-/// for the adopted set, otherwise the zhyd version with the enabled
-/// corrections appended (e.g. "zhyd-empirical-v1+Q2+Q7").
-pub fn versionFor(fixes: Fixes, adopted: Fixes) []const u8 {
-    if (fixes.isNone()) return parity_version;
-    if (fixes.bits() == adopted.bits()) return zhyd_version;
-    return custom_versions[fixes.bits()];
+/// Per-kind values in a parameter override file; null keeps the base value.
+pub const KindOverrides = struct {
+    ASP: ?f64 = null,
+    GLU: ?f64 = null,
+    HIS: ?f64 = null,
+    LYS: ?f64 = null,
+    ARG: ?f64 = null,
+    CYS: ?f64 = null,
+    TYR: ?f64 = null,
+    N_TERM: ?f64 = null,
+    C_TERM: ?f64 = null,
+
+    fn apply(self: KindOverrides, table: *KindTable) void {
+        inline for (std.meta.fields(KindOverrides)) |field| {
+            if (@field(self, field.name)) |v| {
+                const kind = comptime for (std.enums.values(pka.SiteKind)) |k| {
+                    if (std.mem.eql(u8, k.name(), field.name)) break k;
+                } else unreachable;
+                table.set(kind, v);
+            }
+        }
+    }
+
+    fn valid(self: KindOverrides, min: f64, max: f64) bool {
+        inline for (std.meta.fields(KindOverrides)) |field| {
+            if (@field(self, field.name)) |v| {
+                if (!std.math.isFinite(v) or v < min or v > max) return false;
+            }
+        }
+        return true;
+    }
+};
+
+/// Parameter override file for zhyd mode (`zreduce pka --parameters`):
+/// a required version label plus per-kind model pKa values and desolvation
+/// scale factors. Unknown keys are rejected.
+pub const Overrides = struct {
+    version: []const u8,
+    model_pka: KindOverrides = .{},
+    desolvation_scale: KindOverrides = .{},
+
+    pub fn applyTo(self: Overrides, base: Parameters) Parameters {
+        var p = base;
+        p.version = self.version;
+        self.model_pka.apply(&p.model_pka);
+        self.desolvation_scale.apply(&p.desolvation_scale);
+        return p;
+    }
+};
+
+pub const OverrideError = error{ ParameterVersionRequired, ParameterOutOfRange };
+
+/// Parse and validate an override file. The version must not be one of the
+/// built-in labels; model pKa values must lie in −5..20 and scale factors in
+/// 0..10.
+pub fn parseOverrides(allocator: std.mem.Allocator, json: []const u8) !std.json.Parsed(Overrides) {
+    const parsed = try std.json.parseFromSlice(Overrides, allocator, json, .{ .ignore_unknown_fields = false, .allocate = .alloc_always });
+    errdefer parsed.deinit();
+    const v = parsed.value.version;
+    if (v.len == 0 or std.mem.startsWith(u8, v, zhyd_v1_version)) return error.ParameterVersionRequired;
+    if (!parsed.value.model_pka.valid(-5.0, 20.0) or !parsed.value.desolvation_scale.valid(0.0, 10.0)) return error.ParameterOutOfRange;
+    return parsed;
 }
 
 /// Group types of the model ("Group geometry" table).
@@ -153,6 +260,11 @@ pub const Parameters = struct {
     /// aggressive`); used by Q3 and Q4 only.
     break_termini: bool = false,
 
+    // Per-site-kind model pKa and desolvation scale factor (multiplies the
+    // desolvation shift).
+    model_pka: KindTable = default_model_pka,
+    desolvation_scale: KindTable = KindTable.initFill(1.0),
+
     // Internal hydrogens
     nh_length: f64 = 1.01,
 
@@ -207,18 +319,9 @@ pub const Parameters = struct {
 /// covalently coupled); conformation averages include it (amendment A8).
 pub const not_titrating_pka: f64 = 99.99;
 
+/// Model pKa of the parity table.
 pub fn modelPka(kind: pka.SiteKind) f64 {
-    return switch (kind) {
-        .c_term => 3.20,
-        .asp => 3.80,
-        .glu => 4.50,
-        .his => 6.50,
-        .cys => 9.00,
-        .tyr => 10.00,
-        .lys => 10.50,
-        .arg => 12.50,
-        .n_term => 8.00,
-    };
+    return default_model_pka.get(kind);
 }
 
 /// Charge of the charged form; the sign of every shift.
@@ -386,9 +489,33 @@ test "correction sets parse and name their version" {
     try testing.expect((try Fixes.parse("none")).isNone());
     try testing.expectError(error.InvalidFix, Fixes.parse("Q9"));
     try testing.expectError(error.InvalidFix, Fixes.parse(""));
-    try testing.expectEqualStrings("zhyd-empirical-v1+Q2+Q7", versionFor(f, .{ .q1 = true }));
-    try testing.expectEqualStrings(zhyd_version, versionFor(f, f));
-    try testing.expectEqualStrings(parity_version, versionFor(.none, f));
+    try testing.expectEqualStrings("zhyd-empirical-v1+Q2+Q7", versionFor(f, .{ .q1 = true }, false));
+    try testing.expectEqualStrings(zhyd_v1_version, versionFor(f, f, false));
+    try testing.expectEqualStrings(parity_version, versionFor(.none, f, false));
+    try testing.expectEqualStrings(zhyd_version, versionFor(f, f, true));
+    try testing.expectEqualStrings("zhyd-empirical-v1.1+Q2+Q7", versionFor(f, .{ .q1 = true }, true));
+    try testing.expectEqualStrings("zhyd-empirical-v1.1+none", versionFor(.none, f, true));
+}
+
+test "parameter overrides: explicit keys, required version" {
+    const json =
+        \\{"version": "cys-fit", "model_pka": {"CYS": 8.2}, "desolvation_scale": {"CYS": 0.5}}
+    ;
+    const parsed = try parseOverrides(testing.allocator, json);
+    defer parsed.deinit();
+    const p = parsed.value.applyTo(.{});
+    try testing.expectEqualStrings("cys-fit", p.version);
+    try testing.expectEqual(@as(f64, 8.2), p.model_pka.get(.cys));
+    try testing.expectEqual(@as(f64, 0.5), p.desolvation_scale.get(.cys));
+    // Other kinds keep the base values.
+    try testing.expectEqual(@as(f64, 10.0), p.model_pka.get(.tyr));
+    try testing.expectEqual(@as(f64, 1.0), p.desolvation_scale.get(.asp));
+    // Unknown keys, a missing or built-in version, and out-of-range values fail.
+    try testing.expectError(error.UnknownField, parseOverrides(testing.allocator, "{\"version\": \"x\", \"model_pka\": {\"SER\": 1}}"));
+    try testing.expectError(error.UnknownField, parseOverrides(testing.allocator, "{\"version\": \"x\", \"eps_water\": 80}"));
+    try testing.expectError(error.MissingField, parseOverrides(testing.allocator, "{\"model_pka\": {}}"));
+    try testing.expectError(error.ParameterVersionRequired, parseOverrides(testing.allocator, "{\"version\": \"zhyd-empirical-v1.1\"}"));
+    try testing.expectError(error.ParameterOutOfRange, parseOverrides(testing.allocator, "{\"version\": \"x\", \"desolvation_scale\": {\"CYS\": -1}}"));
 }
 
 /// Default charge of a monatomic metal ion by element (Q5); null for
@@ -425,4 +552,14 @@ test "ion table" {
     try testing.expectEqual(@as(?f64, 2.0), ionCharge("ZN"));
     try testing.expectEqual(@as(?f64, -2.0), ionCharge("2N"));
     try testing.expectEqual(@as(?f64, null), ionCharge("SO4"));
+}
+
+test "recalibrated table changes only CYS and TYR" {
+    for (std.enums.values(pka.SiteKind)) |k| {
+        const changed = k == .cys or k == .tyr;
+        try testing.expectEqual(changed, calibrated.model_pka.get(k) != default_model_pka.get(k));
+        try testing.expectEqual(changed, calibrated.desolvation_scale.get(k) != 1.0);
+    }
+    try testing.expectEqual(@as(f64, 8.0), calibrated.model_pka.get(.cys));
+    try testing.expectEqual(@as(f64, 0.2), calibrated.desolvation_scale.get(.tyr));
 }

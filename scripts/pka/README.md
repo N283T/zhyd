@@ -51,6 +51,13 @@ python3 scripts/pka/evaluate.py predictions.csv --output metrics.json
 `--engine empirical --extra-arg=--empirical-fixes --extra-arg=Q2,Q7` for one
 ablation run of the empirical engine.
 
+`calibrate_empirical.py` fits one site kind of the empirical engine (zhyd
+mode) on the train split: an exhaustive grid over the kind's model pKa and
+desolvation scale, with leave-one-cluster-out CV deciding which parameters
+are kept. `--cache` stores the per-row predictions of every grid point, so
+re-running the selection costs nothing; `--fixed` holds kinds already
+fitted. The record of the v1.1 fit is `params/zhyd-empirical-v1.1.json`.
+
 `normalize` keeps numeric, PDB-mapped entries for supported sites and records
 what it excluded. `cluster_id` joins PDB ids linked by PKAD-R's
 `Sequence_Identity_>_30%` and `Alternative_PDBs` columns or by protein name, so

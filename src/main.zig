@@ -431,13 +431,16 @@ fn printPkaUsage() void {
         \\    -o, --output PATH  JSON output (default: stdout)
         \\    --model VALUE      Model selection: 'all' (default) or a number
         \\    --model-only       Emit intrinsic model-pKa baseline without structure terms
-        \\    --parameters PATH  JSON parameter set (calibration/research; needs its own "version")
+        \\    --parameters PATH  JSON parameter set (calibration/research; needs its own "version").
+        \\                       builtin: any built-in parameter; empirical (zhyd mode only):
+        \\                       "model_pka" and "desolvation_scale" per site (e.g. "CYS")
         \\    --engine NAME      'propka' (PROPKA 3.5.1 via zpropka; default when built with
         \\                       -Dpropka=true), 'empirical' (experimental MIT engine,
         \\                       parity with the PROPKA 3 model) or 'builtin'
         \\                       (experimental zhyd model)
         \\    --empirical-mode MODE  Empirical engine: 'parity' (default; PROPKA 3 model,
-        \\                       quirks included) or 'zhyd' (adopted corrections)
+        \\                       quirks included) or 'zhyd' (adopted corrections and
+        \\                       recalibrated parameters)
         \\    --empirical-fixes LIST  Override the empirical corrections: comma-separated
         \\                       Q1..Q8 (e.g. 'Q2,Q7') or 'none' (ablation)
         \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file
@@ -844,44 +847,59 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
     };
     defer allocator.free(source);
 
-    var parsed_params: ?std.json.Parsed(zreduce.pka.Parameters) = null;
-    defer if (parsed_params) |*p| p.deinit();
-    if (config.parameters_path) |path| {
-        const json = zreduce.run.readFile(allocator, path) catch |err| {
-            std.debug.print("Error: cannot read parameters '{s}': {s}\n", .{ path, @errorName(err) });
-            std.process.exit(1);
-        };
-        defer allocator.free(json);
-        parsed_params = zreduce.pka.parseParameters(allocator, json) catch |err| {
-            std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
-            std.process.exit(1);
-        };
-    }
-    const parameters: zreduce.pka.Parameters = if (parsed_params) |p| p.value else .{};
     const engine = config.engine orelse PkaEngine.default();
     if (engine == .propka and !zreduce.pka_propka.available) {
         std.debug.print("Error: this zreduce was built without PROPKA; rebuild with -Dpropka=true\n", .{});
         std.process.exit(1);
     }
-    if (engine != .builtin and (config.parameters_path != null or config.model_only)) {
-        std.debug.print("Error: --parameters and --model-only apply to --engine builtin only\n", .{});
+    const empirical_mode = config.empirical_mode orelse .parity;
+    if (config.model_only and engine != .builtin) {
+        std.debug.print("Error: --model-only applies to --engine builtin only\n", .{});
+        std.process.exit(1);
+    }
+    if (config.parameters_path != null and !(engine == .builtin or (engine == .empirical and empirical_mode == .zhyd))) {
+        std.debug.print("Error: --parameters applies to --engine builtin, or --engine empirical with --empirical-mode zhyd\n", .{});
         std.process.exit(1);
     }
     if (engine != .empirical and (config.empirical_mode != null or config.empirical_fixes != null)) {
         std.debug.print("Error: --empirical-mode and --empirical-fixes apply to --engine empirical only\n", .{});
         std.process.exit(1);
     }
+
+    var parsed_params: ?std.json.Parsed(zreduce.pka.Parameters) = null;
+    defer if (parsed_params) |*p| p.deinit();
+    var parsed_overrides: ?std.json.Parsed(zreduce.pka_empirical.params.Overrides) = null;
+    defer if (parsed_overrides) |*p| p.deinit();
+    if (config.parameters_path) |path| {
+        const json = zreduce.run.readFile(allocator, path) catch |err| {
+            std.debug.print("Error: cannot read parameters '{s}': {s}\n", .{ path, @errorName(err) });
+            std.process.exit(1);
+        };
+        defer allocator.free(json);
+        if (engine == .empirical) {
+            parsed_overrides = zreduce.pka_empirical.params.parseOverrides(allocator, json) catch |err| {
+                std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
+                std.process.exit(1);
+            };
+        } else {
+            parsed_params = zreduce.pka.parseParameters(allocator, json) catch |err| {
+                std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
+                std.process.exit(1);
+            };
+        }
+    }
+    const parameters: zreduce.pka.Parameters = if (parsed_params) |p| p.value else .{};
     const empirical_options = zreduce.pka_empirical.Options{
-        .mode = config.empirical_mode orelse .parity,
+        .mode = empirical_mode,
         .fixes = config.empirical_fixes,
+        .overrides = if (parsed_overrides) |p| p.value else null,
     };
-    const empirical_fixes = empirical_options.effectiveFixes();
     switch (engine) {
         .builtin => std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version}),
         .propka => std.debug.print("note: pKa engine {s}; states are reported, not applied to coordinates\n", .{zreduce.pka_propka.engine_version}),
         .empirical => std.debug.print("warning: pKa engine {s} ({s}) is experimental; states are reported, not applied to coordinates\n", .{
-            zreduce.pka_empirical.engineName(empirical_fixes),
-            zreduce.pka_empirical.params.versionFor(empirical_fixes, zreduce.pka_empirical.zhyd_fixes),
+            empirical_options.engineName(),
+            empirical_options.parameters().version,
         }),
     }
     const prediction_config = zreduce.pka.Config{

@@ -188,6 +188,49 @@ def _site_index(report: dict) -> dict[tuple[str, int, str], dict]:
     return index
 
 
+def pka_command(
+    cif: Path,
+    out: Path,
+    zreduce: Path,
+    parameters: Path | None = None,
+    engine: str | None = None,
+    extra_args: list[str] | None = None,
+) -> list[str]:
+    """The `zreduce pka` command that writes the model-1 report of `cif`."""
+    command = [str(zreduce), "pka", str(cif), "--model", "1", "-o", str(out)]
+    if parameters is not None:
+        command += ["--parameters", str(parameters)]
+    if engine is not None:
+        command += ["--engine", engine]
+    return command + (extra_args or [])
+
+
+def match_site(report: dict, row: dict[str, str]) -> dict | None:
+    """The report site of a canonical row (chain-less rows: first match)."""
+    index = _site_index(report)
+    seq = int(row["auth_seq_id"])
+    if row["chain"]:
+        return index.get((row["chain"], seq, row["site"]))
+    candidates = [v for k, v in index.items() if k[1:] == (seq, row["site"])]
+    return candidates[0] if candidates else None
+
+
+def joined_row(row: dict[str, str], site: dict) -> dict[str, str]:
+    terms = site["pka"]["terms"]
+    return {
+        **row,
+        "comp_id": row["site"],
+        "predicted_pka": str(site["pka"]["predicted"]),
+        "model_pka": str(terms["model"]),
+        "burial": str(terms["burial"]),
+        "hydrogen_bond": str(terms["hydrogen_bond"]),
+        "electrostatic": str(terms["electrostatic"]),
+        "coupling": str(terms["coupling"]),
+        "burial_fraction": str(site["pka"]["burial_fraction"]),
+        "confidence": site["confidence"],
+    }
+
+
 def predict(
     rows: list[dict[str, str]],
     structures: Path,
@@ -209,53 +252,19 @@ def predict(
             if not cif.exists():
                 reports[pdb] = None
             else:
-                command = [
-                    str(zreduce),
-                    "pka",
-                    str(cif),
-                    "--model",
-                    "1",
-                    "-o",
-                    str(out),
-                ]
-                if parameters is not None:
-                    command += ["--parameters", str(parameters)]
-                if engine is not None:
-                    command += ["--engine", engine]
-                command += extra_args or []
+                command = pka_command(cif, out, zreduce, parameters, engine, extra_args)
                 subprocess.run(command, check=True, stderr=subprocess.DEVNULL)
                 reports[pdb] = json.loads(out.read_text())
         report = reports[pdb]
         if report is None:
             status["missing_structure"] += 1
             continue
-        index = _site_index(report)
-        seq = int(row["auth_seq_id"])
-        site = None
-        if row["chain"]:
-            site = index.get((row["chain"], seq, row["site"]))
-        else:
-            candidates = [v for k, v in index.items() if k[1:] == (seq, row["site"])]
-            site = candidates[0] if candidates else None
+        site = match_site(report, row)
         if site is None:
             status["unmatched_site"] += 1
             continue
         status["matched"] += 1
-        terms = site["pka"]["terms"]
-        joined.append(
-            {
-                **row,
-                "comp_id": row["site"],
-                "predicted_pka": str(site["pka"]["predicted"]),
-                "model_pka": str(terms["model"]),
-                "burial": str(terms["burial"]),
-                "hydrogen_bond": str(terms["hydrogen_bond"]),
-                "electrostatic": str(terms["electrostatic"]),
-                "coupling": str(terms["coupling"]),
-                "burial_fraction": str(site["pka"]["burial_fraction"]),
-                "confidence": site["confidence"],
-            }
-        )
+        joined.append(joined_row(row, site))
     return joined, status
 
 

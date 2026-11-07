@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import calibrate_empirical
 import compare_engines
 import compare_propka
 import evaluate
@@ -179,6 +180,52 @@ class PkadrTests(unittest.TestCase):
         self.assertEqual(
             argv[-4:], ["--engine", "empirical", "--empirical-mode", "zhyd"]
         )
+
+    def test_empirical_calibration_selects_by_cluster_cv(self):
+        # Two CYS rows in clusters a and b and one ASP row in cluster c.
+        rows = [
+            {"site": "CYS", "cluster_id": "a", "experimental_pka": "8.0"},
+            {"site": "CYS", "cluster_id": "b", "experimental_pka": "8.2"},
+            {"site": "ASP", "cluster_id": "c", "experimental_pka": "4.0"},
+        ]
+        default = (9.0, 1.0)
+        models = [8.0, 9.0]
+        scales = [0.5, 1.0]
+        # Predictions per (model pKa, scale): lowering the model pKa helps both
+        # CYS rows; the scale only helps row a and hurts row b.
+        table = {
+            (9.0, 1.0): [9.0, 9.2, 4.0],
+            (8.0, 1.0): [8.0, 8.2, 4.0],
+            (9.0, 0.5): [8.5, 9.6, 4.0],
+            (8.0, 0.5): [7.9, 8.6, 4.0],
+        }
+        errors = {p: calibrate_empirical.abs_errors(v, rows) for p, v in table.items()}
+        self.assertEqual(
+            calibrate_empirical.fit(errors, list(table), [0, 1, 2], default),
+            (8.0, 1.0),
+        )
+        # Leaving cluster a out, the fit on b and c alone is still (8.0, 1.0).
+        cv, chosen = calibrate_empirical.loco_cv(
+            errors, list(table), ["a", "b", "c"], default
+        )
+        self.assertEqual(chosen["a"], (8.0, 1.0))
+        self.assertEqual(cv, [0.0, 0.0, 0.0])
+        result = calibrate_empirical.select(
+            errors, rows, "CYS", models, scales, default
+        )
+        self.assertEqual(result["selected"], "model_pka")
+        self.assertEqual(result["variants"]["default"]["cv_mae"], round(2.0 / 3.0, 4))
+        self.assertEqual(result["variants"]["model_pka"]["cv_mae"], 0.0)
+        # Ties prefer the point closest to the default.
+        flat = {p: [0.0, 0.0, 0.0] for p in table}
+        self.assertEqual(
+            calibrate_empirical.fit(flat, list(flat), [0, 1, 2], default), default
+        )
+        overrides = calibrate_empirical.overrides(
+            "v", "CYS", (8.0, 0.5), {"model_pka": {"TYR": 9.5}}
+        )
+        self.assertEqual(overrides["model_pka"], {"TYR": 9.5, "CYS": 8.0})
+        self.assertEqual(overrides["desolvation_scale"], {"CYS": 0.5})
 
 
 if __name__ == "__main__":
