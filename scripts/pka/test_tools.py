@@ -7,6 +7,7 @@ import calibrate_empirical
 import compare_engines
 import compare_propka
 import evaluate
+import external_set
 import pkadr
 
 
@@ -99,6 +100,79 @@ class PkadrTests(unittest.TestCase):
         rows, _ = pkadr.normalize([record(1, "3BDC", name="SNase")])
         row = {**rows[0], "model_pka": "4", "predicted_pka": "4"}
         self.assertEqual(evaluate.assign_split(row, "seed", 0.8), "stress:snase")
+
+    def test_external_set_drops_pkadr_structures_and_homologs(self):
+        pkadr_records = [{"PDB": "1AAA", "Alternative_PDBs": "1BBB"}]
+        clusters = {"1AAA": {0}, "1BBB": {1}, "2CCC": {1, 5}, "3DDD": {7}}
+        pkad3 = [
+            {
+                "PDB_ID": "1BBB",
+                "Chain": "A",
+                "Res_Name": "D",
+                "resid": "5",
+                "Expt_pKa": "3.0",
+                "note": "/",
+            },
+            {
+                "PDB_ID": "2CCC",
+                "Chain": "A",
+                "Res_Name": "E",
+                "resid": "6",
+                "Expt_pKa": "4.0",
+                "note": "/",
+            },
+            {
+                "PDB_ID": "9ZZZ",
+                "Chain": "A",
+                "Res_Name": "K",
+                "resid": "7",
+                "Expt_pKa": "10.0",
+                "note": "/",
+            },
+            {
+                "PDB_ID": "3DDD",
+                "Chain": "A",
+                "Res_Name": "H",
+                "resid": "8",
+                "Expt_pKa": "6.0",
+                "note": "/",
+            },
+            {
+                "PDB_ID": "3DDD",
+                "Chain": "A",
+                "Res_Name": "H",
+                "resid": "8",
+                "Expt_pKa": "7.0",
+                "note": "/",
+            },
+            {
+                "PDB_ID": "3DDD",
+                "Chain": "A",
+                "Res_Name": "D",
+                "resid": "9",
+                "Expt_pKa": "2.0",
+                "note": "T26H",
+            },
+        ]
+        blind = [
+            {
+                "PDB_ID": "3DDD",
+                "Chain": "A",
+                "Res_Name": "LYS",
+                "Res_ID": "10",
+                "Expt_pKa": "10.5",
+            }
+        ]
+        rows, summary = external_set.build(pkad3, blind, pkadr_records, clusters)
+        self.assertEqual(summary["pkadr_structure"], 1)
+        self.assertEqual(summary["homolog_of_pkadr"], 1)
+        self.assertEqual(summary["not_in_cluster_file"], 1)
+        self.assertEqual(
+            [(r["auth_seq_id"], r["site"], r["experimental_pka"]) for r in rows],
+            [("10", "LYS", "10.500"), ("8", "HIS", "6.500")],
+        )
+        self.assertTrue(all(r["holdout_family"] == "external" for r in rows))
+        self.assertEqual(evaluate.assign_split(rows[0], "seed", 0.8), "stress:external")
 
     def test_compare_engines_reports_term_deltas_and_missing_sites(self):
         def site(seq, predicted, burial):

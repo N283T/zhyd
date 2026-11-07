@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `scripts/pka/external_set.py` builds an external pKa test set from PKAD-3_V2
+  and the KaML time-stamped set with no PKAD-R structure or 30 % sequence
+  homolog; results for all engines are in the empirical-engine spec
 - `zreduce pka` without PROPKA now defaults to the empirical engine in zhyd
   mode (`zhyd-empirical-v1.1`); `--engine builtin` keeps the v0.2 model,
   which `--model-only` selects implicitly

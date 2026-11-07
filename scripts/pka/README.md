@@ -68,6 +68,30 @@ related proteins never cross between train and test. SNase rows get
 burial stratum (per split, never mixed), plus a null model that predicts the
 intrinsic model pKa.
 
+## External test set (disjoint from PKAD-R)
+
+PKAD-R train and test have both been looked at during development, so a
+separate set is kept for final checks. `external_set.py` builds it from
+PKAD-3_V2 and the time-stamped blind set of
+[KaML-ESM](https://github.com/JanaShenLab/KaML-ESM) (CC BY-NC 4.0; download
+them yourself, do not commit them), dropping every PKAD-R structure and every
+structure that shares an RCSB 30 % sequence cluster
+([clusters-by-entity-30.txt](https://cdn.rcsb.org/resources/sequence/clusters/clusters-by-entity-30.txt))
+with one:
+
+```sh
+python3 scripts/pka/external_set.py --pkad3 PKAD-3_V2.csv \
+    --blind time_stamped/blind_test.csv --pkadr PKAD-R-250211.json \
+    --clusters clusters-by-entity-30.txt -o external.csv
+python3 scripts/pka/pkadr.py fetch external.csv --structures ext_structures/
+python3 scripts/pka/pkadr.py predict external.csv --structures ext_structures/ \
+    --reports ext_reports/ -o ext_predictions.csv
+python3 scripts/pka/evaluate.py ext_predictions.csv --output ext_metrics.json
+```
+
+Rows carry `holdout_family=external`, so `evaluate.py` reports them only as
+`stress:external`. Use it sparingly: every look makes it less independent.
+
 ## Calibration
 
 ```sh

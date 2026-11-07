@@ -1,6 +1,6 @@
 # zhyd empirical pKa engine — specification
 
-Status: draft r4 (2026-11-07); parity mode implemented and accepted with
+Status: draft r5 (2026-11-07); parity mode implemented and accepted with
 documented deviations (see [Parity status](#parity-status-r2)); zhyd mode
 corrections Q1–Q8 implemented, measured and adopted (see
 [zhyd mode ablation](#zhyd-mode-ablation-r3)); recalibrated table
@@ -805,6 +805,33 @@ and further work is judged by G2. Unexplained deviations:
 - **D7** Ligand and nucleic-acid groups: out of scope (943 of the 974
   deposited-set outliers above 0.02 disappear when they are stripped).
 
+### External test (r5)
+
+`scripts/pka/external_set.py` (2026-11-07): PKAD-3_V2 and the KaML
+time-stamped blind set, minus every PKAD-R structure and every structure
+sharing an RCSB 30 % sequence cluster with one. 122 sites in 48 structures
+(46 clusters); 116 are predicted by every engine below. Looked at once, after
+v1.1 was fixed; nothing was tuned on it.
+
+| Engine | MAE | RMSE | ASP | GLU | HIS | LYS | CYS | TYR |
+|---|---|---|---|---|---|---|---|---|
+| null (model pKa) | 1.213 | | | | | | | |
+| `propka` | 1.320 | 2.048 | 0.94 | 0.51 | 0.73 | 1.09 | 3.24 | 2.89 |
+| `empirical` parity | 1.298 | 2.005 | 0.94 | 0.50 | 0.77 | 0.89 | 3.22 | 2.85 |
+| `empirical` zhyd v1.1 | **1.102** | **1.656** | 0.94 | 0.57 | 0.77 | 0.91 | 2.35 | 1.54 |
+| `builtin` v0.2 | 1.302 | 1.898 | 1.26 | 0.93 | 0.83 | 1.64 | 2.08 | 1.62 |
+| pKAI | 1.547 | 2.376 | 1.15 | 1.21 | 0.71 | 1.96 | 3.01 | 2.93 |
+| pKAI+ | 1.302 | 2.003 | 1.06 | 1.04 | 0.76 | 1.44 | 2.42 | 1.98 |
+
+Sites per residue: ASP 26, GLU 17, HIS 32, LYS 16, CYS 20, TYR 5. Cluster
+bootstrap (2000 resamples) of the per-site MAE difference, zhyd v1.1 minus
+other: PROPKA −0.22 [−0.48, −0.01], pKAI+ −0.20 [−0.47, +0.03], null −0.11
+[−0.41, +0.15]. zhyd v1.1 is the best engine here, but only the gain over
+PROPKA is resolved; no engine is clearly better than the null model on this
+set, which is CYS-heavy (20 of 116 sites) and harder than PKAD-R (null MAE
+1.21 vs 0.88 on the PKAD-R test split). The HIS advantage of pKAI+ seen on
+PKAD-R does not reproduce here.
+
 ## Revision log
 
 | Rev | Date | Change |
@@ -814,3 +841,4 @@ and further work is judged by G2. Unexplained deviations:
 | r2 | 2026-11-07 | Amendments from the first parity implementation (black-box oracle probes): distance-based bonds and carboxyl atoms, covalent coupling, conformation refinements (uneven alternates, not-titrating averaging, insertion codes, shared identities), planar-pair and bisector H rules, COO–ARG neighbour rule, N-terminus details; Q7 reworded; parity status and deviations D1–D7 |
 | r3 | 2026-11-07 | zhyd mode: Q8 (insertion-code artefacts) added; precise rules for Q1–Q8; Q6 recorded as a no-op of the parity input; evaluation protocol and ablation on PKAD-R; adopted set Q1, Q3, Q5–Q8 (Q2, Q4 not adopted); version and engine naming of correction sets |
 | r4 | 2026-11-07 | Protocol amendment (adopt physically motivated corrections with train-MAE effect within ±0.002); Q2 and Q4 adopted, zhyd v1 = Q1–Q8; per-kind model pKa and desolvation scale parameters with zhyd-mode override files; recalibrated table `zhyd-empirical-v1.1` (CYS and TYR, train split, leave-one-cluster-out CV); new version scheme |
+| r5 | 2026-11-07 | External test set disjoint from PKAD-R (30 % sequence clusters) and its results |
