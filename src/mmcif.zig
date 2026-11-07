@@ -137,7 +137,17 @@ fn entityTypeFromString(s: []const u8) EntityType {
 }
 
 fn applyEntityTypes(mdl: *Model, block: *const cif.Block) void {
-    const ent = block.findLoop("_entity.id") orelse return;
+    const ent = block.findLoop("_entity.id") orelse {
+        // Single-entity files usually write _entity as key-value pairs.
+        const eid = cif.asString(block.findValue("_entity.id") orelse return);
+        const etype = entityTypeFromString(cif.asString(block.findValue("_entity.type") orelse return));
+        if (etype == .unknown) return;
+        for (mdl.chains.items) |chain| {
+            if (!std.mem.eql(u8, chain.entityIdSlice(), eid)) continue;
+            for (mdl.residues.items[chain.residue_start..chain.residue_end]) |*res| res.entity_type = etype;
+        }
+        return;
+    };
     const col_id = ent.findTag("_entity.id") orelse return;
     const col_type = ent.findTag("_entity.type") orelse return;
 
@@ -676,6 +686,40 @@ test "parseModel stores auth_seq_id and falls back" {
     // Branched NAG residue 2: label_seq_id="." -> fallback to auth_seq_id=2
     try testing.expectEqual(@as(i32, 2), mdl.residues.items[4].seq_id);
     try testing.expectEqual(@as(i32, 2), mdl.residues.items[4].auth_seq_id);
+}
+
+test "parseModel sets entity_type from _entity key-value pairs" {
+    const source =
+        \\data_PAIR
+        \\_entity.id   1
+        \\_entity.type polymer
+        \\#
+        \\loop_
+        \\_atom_site.group_PDB
+        \\_atom_site.id
+        \\_atom_site.type_symbol
+        \\_atom_site.label_atom_id
+        \\_atom_site.label_comp_id
+        \\_atom_site.label_asym_id
+        \\_atom_site.label_entity_id
+        \\_atom_site.label_seq_id
+        \\_atom_site.auth_seq_id
+        \\_atom_site.Cartn_x
+        \\_atom_site.Cartn_y
+        \\_atom_site.Cartn_z
+        \\_atom_site.occupancy
+        \\_atom_site.B_iso_or_equiv
+        \\_atom_site.label_alt_id
+        \\_atom_site.pdbx_PDB_ins_code
+        \\ATOM 1 N N  ALA A 1 1 1 1.0 0.0 0.0 1.0 0.0 . .
+        \\ATOM 2 C CA ALA A 1 1 1 2.0 0.0 0.0 1.0 0.0 . .
+        \\#
+        \\
+    ;
+    var mdl = try parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    try testing.expectEqual(@as(usize, 1), mdl.residues.items.len);
+    try testing.expectEqual(EntityType.polymer, mdl.residues.items[0].entity_type);
 }
 
 test "parseModel sets entity_type from _entity loop" {

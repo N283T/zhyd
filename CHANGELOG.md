@@ -61,6 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `NtermMode` enum re-exported from `zreduce.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
+- `_entity` written as key-value pairs (single-entity files) now sets residue
+  entity types; such files previously had no polymer residues and no pKa
+  sites (#264)
 - Protonation override files now use a bounded whole-file read, avoiding Zig
   0.16 `EndOfStream` failures on ordinary short control files
 - N-terminal PRO residues now actually receive NH2+ hydrogens (H2, H3) during hydrogen placement. Previously the dispatch required a backbone amide plan in the residue's standard plan list, but PRO has no such plan (its N is already bonded to CA and CD), so `placeNtermNH2Pro` was effectively dead code and N-terminal PRO received no backbone H at all. Uncovered during review of #252.
