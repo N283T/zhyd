@@ -744,10 +744,11 @@ pair terms.
   multiplies that kind's desolvation shift (range 0..10, default 1.0).
   Unknown keys are an error. Overrides apply on top of the mode's table.
 - CLI: `zreduce pka --engine empirical [--empirical-mode parity|zhyd]
-  [--empirical-fixes Q1,..|none] [--parameters PATH]` (default parity; the
+  [--empirical-fixes Q1,..|none] [--parameters PATH]` (default zhyd; the
   mode and fix options are rejected for other engines, `--parameters` in
-  parity mode). When it meets the acceptance gates it replaces the current
-  `builtin` (v0.2) engine.
+  parity mode). Having met G2, zhyd mode replaced `builtin` (v0.2) as the
+  default engine of builds without PROPKA (2026-11-07); `builtin` stays
+  selectable with `--engine builtin` and is implied by `--model-only`.
 
 ## Validation
 

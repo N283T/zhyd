@@ -45,9 +45,10 @@ const PkaEngine = enum {
     propka,
     empirical,
 
-    /// PROPKA when compiled in (zig build -Dpropka=true), else built-in.
+    /// PROPKA when compiled in (zig build -Dpropka=true), else the MIT
+    /// empirical engine.
     fn default() PkaEngine {
-        return if (zreduce.pka_propka.available) .propka else .builtin;
+        return if (zreduce.pka_propka.available) .propka else .empirical;
     }
 };
 
@@ -435,12 +436,13 @@ fn printPkaUsage() void {
         \\                       builtin: any built-in parameter; empirical (zhyd mode only):
         \\                       "model_pka" and "desolvation_scale" per site (e.g. "CYS")
         \\    --engine NAME      'propka' (PROPKA 3.5.1 via zpropka; default when built with
-        \\                       -Dpropka=true), 'empirical' (experimental MIT engine,
-        \\                       parity with the PROPKA 3 model) or 'builtin'
-        \\                       (experimental zhyd model)
-        \\    --empirical-mode MODE  Empirical engine: 'parity' (default; PROPKA 3 model,
-        \\                       quirks included) or 'zhyd' (adopted corrections and
-        \\                       recalibrated parameters)
+        \\                       -Dpropka=true), 'empirical' (experimental MIT engine
+        \\                       based on the PROPKA 3 model; default otherwise) or
+        \\                       'builtin' (earlier experimental zhyd model; implied by
+        \\                       --model-only)
+        \\    --empirical-mode MODE  Empirical engine: 'zhyd' (default; adopted corrections
+        \\                       and recalibrated parameters) or 'parity' (PROPKA 3
+        \\                       model, quirks included)
         \\    --empirical-fixes LIST  Override the empirical corrections: comma-separated
         \\                       Q1..Q8 (e.g. 'Q2,Q7') or 'none' (ablation)
         \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file
@@ -847,12 +849,13 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
     };
     defer allocator.free(source);
 
-    const engine = config.engine orelse PkaEngine.default();
+    // --model-only is a builtin-engine feature, so it selects that engine.
+    const engine = config.engine orelse if (config.model_only) PkaEngine.builtin else PkaEngine.default();
     if (engine == .propka and !zreduce.pka_propka.available) {
         std.debug.print("Error: this zreduce was built without PROPKA; rebuild with -Dpropka=true\n", .{});
         std.process.exit(1);
     }
-    const empirical_mode = config.empirical_mode orelse .parity;
+    const empirical_mode = config.empirical_mode orelse .zhyd;
     if (config.model_only and engine != .builtin) {
         std.debug.print("Error: --model-only applies to --engine builtin only\n", .{});
         std.process.exit(1);

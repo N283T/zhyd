@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `zreduce pka` without PROPKA now defaults to the empirical engine in zhyd
+  mode (`zhyd-empirical-v1.1`); `--engine builtin` keeps the v0.2 model,
+  which `--model-only` selects implicitly
 - Experimental, independently implemented staged protein pKa predictor for
   ASP/GLU/HIS/LYS/CYS/TYR and peptide termini (`zreduce pka`), with explicit
   model, burial, hydrogen-bond, electrostatic, and mean-field coupling terms

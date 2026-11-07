@@ -42,7 +42,7 @@ that the paper be cited), then:
 python3 scripts/pka/pkadr.py normalize PKAD-R-250211.json -o canonical.csv
 python3 scripts/pka/pkadr.py fetch canonical.csv --structures structures/
 python3 scripts/pka/pkadr.py predict canonical.csv --structures structures/ \
-    --reports reports/ -o predictions.csv [--parameters params.json]
+    --reports reports/ -o predictions.csv [--engine builtin --parameters params.json]
 python3 scripts/pka/evaluate.py predictions.csv --output metrics.json
 ```
 

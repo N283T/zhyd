@@ -148,17 +148,19 @@ With `-Dpropka=true`, `pka` uses PROPKA 3.5.1 by default (`--engine propka`).
 Its values match `propka3` run on the same structure to the two decimals
 PROPKA prints. Crystal waters are dropped before PROPKA, as PDB2PQR does;
 `--propka-keep-waters` keeps them for an exact reproduction of PROPKA run on
-the deposited file. `--engine empirical` selects an experimental MIT
-reimplementation of the PROPKA 3 protein model, written from
+the deposited file. Without PROPKA, `pka` uses `--engine empirical`, an
+experimental MIT reimplementation of the PROPKA 3 protein model, written from
 [a specification](docs/specs/zhyd-pka-empirical-engine.md) and available in
 every build; on protein-only PKAD-R structures 99.84 % of its sites are
 within 0.02 of PROPKA (ligand and nucleic-acid groups are not modelled yet).
-`--empirical-mode zhyd` turns on the corrections of PROPKA's model quirks
+By default it runs in zhyd mode: corrections of PROPKA's model quirks
 and a CYS/TYR recalibration (`zhyd-empirical-v1.1`, experimental and
-unvalidated; PKAD-R test MAE 0.71 against 1.17 for parity);
+unvalidated; PKAD-R test MAE 0.71 against 1.17 for PROPKA);
+`--empirical-mode parity` reproduces the PROPKA 3 model instead;
 `--empirical-fixes` selects corrections one by one and `--parameters`
 overrides per-site model pKa and desolvation scale in zhyd mode.
-`--engine builtin` selects the experimental built-in model below.
+`--engine builtin` selects the earlier experimental built-in model below
+(also used by `--model-only`).
 
 The built-in parameter set, `zhyd-pka-protein-v0.2`, was fitted on a
 cluster-split PKAD-R training set. On held-out proteins it is slightly better

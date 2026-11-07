@@ -52,7 +52,9 @@ def objective(
 ) -> float:
     param_path = work / "params.json"
     param_path.write_text(json.dumps(params))
-    joined, _ = pkadr.predict(rows, structures, zreduce, work / "reports", param_path)
+    joined, _ = pkadr.predict(
+        rows, structures, zreduce, work / "reports", param_path, engine="builtin"
+    )
     errors = [float(r["predicted_pka"]) - float(r["experimental_pka"]) for r in joined]
     if kind == "rmse":
         return (sum(e * e for e in errors) / len(errors)) ** 0.5

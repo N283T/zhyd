@@ -2,8 +2,8 @@
 
 Status: three pKa engines. PROPKA 3.5.1 via the optional zpropka port
 (reference method, reproduces `propka3`), the experimental MIT empirical
-engine (parity mode `zhyd-empirical-v1-parity`, default; zhyd mode
-`zhyd-empirical-v1.1`, experimental), and the experimental
+engine (zhyd mode `zhyd-empirical-v1.1`, the default engine without
+PROPKA; parity mode `zhyd-empirical-v1-parity`), and the earlier experimental
 built-in model (`zhyd-pka-protein-v0.2`, fitted, not accepted for
 production). Schema v1.
 
@@ -19,8 +19,8 @@ and `batch` behavior remains compatible.
 | Engine | Where | License | Status |
 |---|---|---|---|
 | `propka` | [zpropka](https://github.com/N283T/zpropka), optional dependency (`zig build -Dpropka=true`) | LGPL-2.1 (derivative of PROPKA 3.5.1) | Reproduces `propka3` 3.5.1 output; default when built in |
-| `empirical` | `src/pka_empirical.zig` | MIT | Experimental; clean-room reimplementation of the PROPKA 3 protein model from a written spec, parity mode only (99.84 % of protein sites within 0.02 of `propka`) |
-| `builtin` | `src/pka.zig` | MIT | Experimental, independently written |
+| `empirical` | `src/pka_empirical.zig` | MIT | Experimental; default without PROPKA. Clean-room reimplementation of the PROPKA 3 protein model from a written spec. Parity mode: 99.84 % of protein sites within 0.02 of `propka`; zhyd mode (default): PKAD-R test MAE 0.71 |
+| `builtin` | `src/pka.zig` | MIT | Experimental, independently written; superseded as default, used for `--model-only` |
 
 zpropka is a faithful Zig port of PROPKA 3.5.1, kept in its own repository so
 the default zreduce build stays MIT-only. zreduce talks to it only through
