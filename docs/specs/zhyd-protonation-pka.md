@@ -2,7 +2,8 @@
 
 Status: three pKa engines. PROPKA 3.5.1 via the optional zpropka port
 (reference method, reproduces `propka3`), the experimental MIT empirical
-engine (parity mode, `zhyd-empirical-v1-parity`), and the experimental
+engine (parity mode `zhyd-empirical-v1-parity`, default; zhyd mode
+`zhyd-empirical-v1`, experimental), and the experimental
 built-in model (`zhyd-pka-protein-v0.2`, fitted, not accepted for
 production). Schema v1.
 
@@ -54,7 +55,9 @@ protocol, parity quirks and acceptance gates are in
 [zhyd-pka-empirical-engine.md](zhyd-pka-empirical-engine.md);
 `scripts/pka/compare_engines.py` checks parity against the oracle. Parity
 mode is implemented as `--engine empirical`; its parity numbers and the
-remaining deviations are in the spec's *Parity status* section.
+remaining deviations are in the spec's *Parity status* section. zhyd mode
+(`--empirical-mode zhyd`) applies the adopted corrections; their rules and
+the PKAD-R ablation are in the spec's *zhyd mode* sections.
 
 The built-in engine is based on scientific concepts described by the primary
 papers, especially continuous burial/desolvation, hydrogen bonds,

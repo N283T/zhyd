@@ -33,6 +33,12 @@ pub fn angleFactor(donor: Vec, hydrogen: Vec, acceptor: Vec) f64 {
     return u.dot(v);
 }
 
+/// Angle factor as used by the side-chain H-bond terms: the raw cosine in
+/// parity mode (its sign is lost in E_hb), max(0, cos) with Q2.
+pub fn sideChainAngle(cos: f64, params: Parameters) f64 {
+    return if (params.fixes.q2) @max(0.0, cos) else cos;
+}
+
 /// E_coul = |244.12 / (ε · r′) · t|.
 pub fn coulombEnergy(r: f64, w: f64, params: Parameters) f64 {
     const eps = params.eps_water - (params.eps_water - params.eps_protein) * w;
@@ -110,17 +116,22 @@ fn isPair(g1: *const Group, g2: *const Group, a: params_mod.GroupType, b: params
 /// COO–ARG angle factor for ARG atom `arg_atom` and carboxyl oxygen `o`:
 /// for a hydrogen, cos(N→H, H→O); for a nitrogen, the cosine of largest
 /// magnitude over its bonded heavy neighbours X of cos(X→N, N→O) (the spec's
-/// open point; amendment A9). 1 when the atom has no neighbour.
-fn argAngle(conf: *const Conformation, arg_atom: u32, o: u32) f64 {
+/// open point; amendment A9). 1 when the atom has no neighbour. With Q2 the
+/// nitrogen uses the largest cosine and every value is clamped at 0.
+fn argAngle(conf: *const Conformation, arg_atom: u32, o: u32, params: Parameters) f64 {
     const atoms = conf.atoms.items;
     const atom = atoms[arg_atom];
-    if (atom.isHydrogen()) return angleFactor(atoms[atom.parent].pos, atom.pos, atoms[o].pos);
+    if (atom.isHydrogen()) return sideChainAngle(angleFactor(atoms[atom.parent].pos, atom.pos, atoms[o].pos), params);
     var best: ?f64 = null;
     for (conf.neighbours(arg_atom)) |nb| {
         const c = angleFactor(atoms[nb].pos, atom.pos, atoms[o].pos);
-        if (best == null or @abs(c) > @abs(best.?)) best = c;
+        const prev = best orelse {
+            best = c;
+            continue;
+        };
+        if (if (params.fixes.q2) c > prev else @abs(c) > @abs(prev)) best = c;
     }
-    return best orelse 1.0;
+    return sideChainAngle(best orelse 1.0, params);
 }
 
 /// COO–ARG: sum over the two closest disjoint atom pairs.
@@ -139,7 +150,7 @@ fn carboxylArginine(conf: *const Conformation, coo: *const Group, arg: *const Gr
     while (k < 2) : (k += 1) {
         const cp = closestPair(conf, l1, l2) orelse break;
         if (cp.d < cut.c2) {
-            total += hbondEnergy(cp.d, params.hbond_max, cut.c1, cut.c2, argAngle(conf, cp.b, cp.a));
+            total += hbondEnergy(cp.d, params.hbond_max, cut.c1, cut.c2, argAngle(conf, cp.b, cp.a, params));
         }
         l1 = removeValue(l1, cp.a);
         l2 = removeValue(l2, cp.b);
@@ -178,6 +189,7 @@ pub fn sideChainHbond(conf: *const Conformation, g1: *const Group, g2: *const Gr
         const a1 = atoms[cp.a];
         angle = if (a1.isHydrogen()) angleFactor(atoms[a1.parent].pos, a1.pos, atoms[cp.b].pos) else 0.0;
     }
+    angle = sideChainAngle(angle, params);
     if (g1.gtype == .coo and g2.gtype == .coo) {
         const w12 = desolvation.pairWeight(g1.count, g2.count, params);
         return hbondEnergy(cp.d, params.hbond_max, cut.c1, cut.c2, 1.0) * (1.0 + w12);
@@ -396,4 +408,34 @@ test "ion Coulomb determinant by hand" {
     try testing.expectApproxEqAbs(-2.0 * 244.12 / 960.0 * 2.0 / 3.0, ionDeterminant(&asp, &zn, p), 1e-12);
     const far = Group{ .gtype = .ion, .residue_idx = 2, .group_atom = 1, .center = .{ .x = 10.5, .y = 0, .z = 0 }, .q = 2 };
     try testing.expectEqual(@as(f64, 0), ionDeterminant(&asp, &far, p));
+}
+
+test "Q2: a negative angle cosine gives no side-chain H-bond" {
+    var conf = Conformation{ .allocator = testing.allocator };
+    defer conf.deinit();
+    // TRP NE1 at the origin with HE1 along +x; carboxyl O behind the H:
+    // H→O = (−0.3, 1.6), |H→O| = 1.6279 < c₁ = 2.0 (COO–TRP), so f = 1 and
+    // cos = −0.3 / 1.6279. N–O = 1.7505, so the H is the closest atom.
+    try conf.atoms.append(testing.allocator, testAtom(0, 0, .n, 1));
+    var h = testAtom(1.01, 0, .h, 1);
+    h.parent = 0;
+    try conf.atoms.append(testing.allocator, h);
+    try conf.atoms.append(testing.allocator, testAtom(0.71, 1.6, .o, 5));
+    var trp = Group{ .gtype = .trp, .residue_idx = 1, .group_atom = 0, .center = conf.atoms.items[0].pos };
+    trp.acid_list.append(0);
+    trp.acid_list.append(1);
+    trp.base_list.append(0);
+    var asp = Group{ .gtype = .coo, .kind = .asp, .residue_idx = 5, .group_atom = 2, .center = conf.atoms.items[2].pos, .q = -1, .model_pka = 3.8 };
+    asp.acid_list.append(2);
+    asp.base_list.append(2);
+    const cos = 0.3 / @sqrt(0.3 * 0.3 + 1.6 * 1.6);
+    // Parity: |0.85 · 1 · (−cos)|.
+    try testing.expectApproxEqAbs(0.85 * cos, sideChainHbond(&conf, &asp, &trp, .{}), 1e-12);
+    // Q2: F_angle = max(0, cos) = 0.
+    const q2 = Parameters{ .fixes = .{ .q2 = true } };
+    try testing.expectEqual(@as(f64, 0), sideChainHbond(&conf, &asp, &trp, q2));
+    // Mirrored in front of the H (cos > 0): both modes agree.
+    conf.atoms.items[2].pos.x = 1.31;
+    try testing.expectApproxEqAbs(0.85 * cos, sideChainHbond(&conf, &asp, &trp, q2), 1e-12);
+    try testing.expectApproxEqAbs(0.85 * cos, sideChainHbond(&conf, &asp, &trp, .{}), 1e-12);
 }

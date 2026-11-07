@@ -141,6 +141,45 @@ class PkadrTests(unittest.TestCase):
         ok, _ = compare_engines.summarize(rows, 0.02, 0.1, 0.99)
         self.assertFalse(ok)
 
+    def test_predict_appends_engine_and_extra_args(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            structures = root / "structures"
+            structures.mkdir()
+            (structures / "1ABC.cif").write_text("data_1ABC\n")
+            argv_log = root / "argv.json"
+            # Stand-in for zreduce: record argv, write a one-site report.
+            fake = root / "fake_zreduce.py"
+            fake.write_text(
+                "import json, sys\n"
+                f"open({str(argv_log)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+                "out = sys.argv[sys.argv.index('-o') + 1]\n"
+                "site = {'id': {'chain_auth': 'A', 'auth_seq_id': 10, 'site': 'ASP'},"
+                " 'pka': {'predicted': 4.1, 'burial_fraction': 0.0, 'terms': {"
+                "'model': 3.8, 'burial': 0.3, 'hydrogen_bond': 0.0,"
+                " 'electrostatic': 0.0, 'coupling': 0.0}}, 'confidence': 'high'}\n"
+                "json.dump({'models': [{'sites': [site]}]}, open(out, 'w'))\n"
+            )
+            fake.chmod(0o755)
+            launcher = root / "zreduce"
+            launcher.write_text(f'#!/bin/sh\nexec python3 {fake} "$@"\n')
+            launcher.chmod(0o755)
+            rows, _ = pkadr.normalize([record(1, "1ABC")])
+            joined, status = pkadr.predict(
+                rows,
+                structures,
+                launcher,
+                root / "reports",
+                engine="empirical",
+                extra_args=["--empirical-mode", "zhyd"],
+            )
+            argv = json.loads(argv_log.read_text())
+        self.assertEqual(status["matched"], 1)
+        self.assertEqual(joined[0]["predicted_pka"], "4.1")
+        self.assertEqual(
+            argv[-4:], ["--engine", "empirical", "--empirical-mode", "zhyd"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

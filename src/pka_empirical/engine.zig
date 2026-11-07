@@ -124,11 +124,11 @@ pub const SiteSum = struct {
 
 /// Conformation average of one site identity: (chain, residue number, site
 /// kind), insertion code ignored (amendment A10). Every residue that carried
-/// the site in some conformation reports the same mean.
+/// the site in some conformation reports the same mean. With Q8 the identity
+/// is (residue, site kind).
 const Accumulator = struct {
     sum: SiteSum,
-    chain_key: u32,
-    res_num: i32,
+    key: Identity,
     residues: [16]u32 = undefined,
     n_residues: usize = 0,
 
@@ -140,11 +140,29 @@ const Accumulator = struct {
     }
 };
 
-fn findAcc(allocator: std.mem.Allocator, accs: *std.ArrayListUnmanaged(Accumulator), chain_key: u32, res_num: i32, kind: pka.SiteKind, residue_idx: u32) !*Accumulator {
-    for (accs.items) |*a| {
-        if (a.chain_key == chain_key and a.res_num == res_num and a.sum.kind == kind) return a;
+/// Site identity used to match groups across and within conformations.
+const Identity = struct {
+    kind: pka.SiteKind,
+    /// Parity: chain key and residue number. Q8: residue index (`b` unused).
+    a: u32,
+    b: i32,
+
+    fn of(conf: *const sites.Conformation, g: Group, params: Parameters) Identity {
+        if (params.fixes.q8) return .{ .kind = g.kind.?, .a = g.residue_idx, .b = 0 };
+        const atom = conf.atoms.items[g.group_atom];
+        return .{ .kind = g.kind.?, .a = atom.chain_key, .b = atom.res_num };
     }
-    try accs.append(allocator, .{ .sum = .{ .residue_idx = residue_idx, .kind = kind }, .chain_key = chain_key, .res_num = res_num });
+
+    fn eql(x: Identity, y: Identity) bool {
+        return x.kind == y.kind and x.a == y.a and x.b == y.b;
+    }
+};
+
+fn findAcc(allocator: std.mem.Allocator, accs: *std.ArrayListUnmanaged(Accumulator), key: Identity, residue_idx: u32) !*Accumulator {
+    for (accs.items) |*a| {
+        if (a.key.eql(key)) return a;
+    }
+    try accs.append(allocator, .{ .sum = .{ .residue_idx = residue_idx, .kind = key.kind }, .key = key });
     return &accs.items[accs.items.len - 1];
 }
 
@@ -169,62 +187,72 @@ pub fn run(allocator: std.mem.Allocator, mdl: *const Model, params: Parameters) 
         defer chosen.deinit(allocator);
         for (conf.groups.items, 0..) |g, gi| {
             if (g.kind == null) continue;
-            const atom = conf.atoms.items[g.group_atom];
+            const key = Identity.of(&conf, g, params);
             const slot = for (chosen.items) |*c| {
-                const o = conf.groups.items[c.*];
-                const oa = conf.atoms.items[o.group_atom];
-                if (o.kind.? == g.kind.? and oa.chain_key == atom.chain_key and oa.res_num == atom.res_num) break c;
+                if (Identity.of(&conf, conf.groups.items[c.*], params).eql(key)) break c;
             } else null;
             if (slot != null) {
-                const acc = try findAcc(allocator, &accs, atom.chain_key, atom.res_num, g.kind.?, g.residue_idx);
+                const acc = try findAcc(allocator, &accs, key, g.residue_idx);
                 acc.addResidue(g.residue_idx);
             } else try chosen.append(allocator, @intCast(gi));
         }
         for (chosen.items) |gi| {
             const g = conf.groups.items[gi];
-            const kind = g.kind.?;
-            const atom = conf.atoms.items[g.group_atom];
-            const acc = try findAcc(allocator, &accs, atom.chain_key, atom.res_num, kind, g.residue_idx);
+            const acc = try findAcc(allocator, &accs, Identity.of(&conf, g, params), g.residue_idx);
             acc.addResidue(g.residue_idx);
-            const entry = &acc.sum;
-            entry.n += 1;
-            if (g.disulfide or g.coupled_out) {
-                // Not titrating in this conformation: the oracle averages a
-                // fixed 99.99 with zero terms (amendment A8).
-                entry.disulfide = entry.disulfide or g.disulfide;
-                if (ci == 0) entry.not_titrating_first = true;
-                entry.predicted += params_mod.not_titrating_pka;
-                continue;
-            }
-            entry.n_titrating += 1;
-            entry.predicted += g.total();
-            entry.burial += g.desolvation + g.reorganisation;
-            entry.hydrogen_bond += g.side_chain + g.backbone;
-            entry.electrostatic += g.coulomb;
-            entry.weight += g.weight;
-            entry.center = entry.center.add(g.center);
+            addConformation(&acc.sum, g, ci == 0, params);
         }
     }
 
-    // The mean runs over all conformations; a site absent from one
-    // contributes zero (amendment A10).
-    const inv = 1.0 / @as(f64, @floatFromInt(n_conf));
     var out: std.ArrayListUnmanaged(SiteSum) = .empty;
     errdefer out.deinit(allocator);
     for (accs.items) |*a| {
-        var s = a.sum;
-        s.predicted *= inv;
-        s.burial *= inv;
-        s.hydrogen_bond *= inv;
-        s.electrostatic *= inv;
-        s.weight *= inv;
-        if (s.n_titrating > 0) s.center = s.center.scale(1.0 / @as(f64, @floatFromInt(s.n_titrating)));
+        var s = mean(a.sum, @intCast(n_conf), params);
         for (a.residues[0..a.n_residues]) |ri| {
             s.residue_idx = ri;
             try out.append(allocator, s);
         }
     }
     return out.toOwnedSlice(allocator);
+}
+
+/// Add one conformation's group to its site sum. A group that does not
+/// titrate (disulfide, covalently coupled) adds the fixed 99.99 with zero
+/// terms in parity mode (amendment A8) and nothing with Q7.
+pub fn addConformation(entry: *SiteSum, g: Group, first_conformation: bool, params: Parameters) void {
+    entry.n += 1;
+    if (g.disulfide or g.coupled_out) {
+        entry.disulfide = entry.disulfide or g.disulfide;
+        if (first_conformation) entry.not_titrating_first = true;
+        if (!params.fixes.q7) entry.predicted += params_mod.not_titrating_pka;
+        return;
+    }
+    entry.n_titrating += 1;
+    entry.predicted += g.total();
+    entry.burial += g.desolvation + g.reorganisation;
+    entry.hydrogen_bond += g.side_chain + g.backbone;
+    entry.electrostatic += g.coulomb;
+    entry.weight += g.weight;
+    entry.center = entry.center.add(g.center);
+}
+
+/// Conformation mean of a site sum. Parity: over all `n_conf`
+/// conformations; a site absent from one contributes zero (amendment A10).
+/// Q8: over the conformations in which the site exists. Q7: over those in
+/// which it titrates (and a site not titrating in the first conformation is
+/// still reported when it titrates in another).
+pub fn mean(sum: SiteSum, n_conf: u32, params: Parameters) SiteSum {
+    var s = sum;
+    const denominator: u32 = if (params.fixes.q7) s.n_titrating else if (params.fixes.q8) s.n else n_conf;
+    if (params.fixes.q7) s.not_titrating_first = false;
+    const inv = if (denominator == 0) 0.0 else 1.0 / @as(f64, @floatFromInt(denominator));
+    s.predicted *= inv;
+    s.burial *= inv;
+    s.hydrogen_bond *= inv;
+    s.electrostatic *= inv;
+    s.weight *= inv;
+    if (s.n_titrating > 0) s.center = s.center.scale(1.0 / @as(f64, @floatFromInt(s.n_titrating)));
+    return s;
 }
 
 const testing = std.testing;
@@ -260,5 +288,46 @@ test "N-terminal histidine is covalently coupled to the N-terminus" {
             try testing.expectEqual(pka.SiteKind.n_term, s.kind);
             try testing.expect(!s.not_titrating_first);
         }
+    }
+}
+
+test "Q7 and Q8: conformation means by hand" {
+    const zero = sites.Vec{ .x = 0, .y = 0, .z = 0 };
+    // ASP: model 3.80 + desolvation 0.40 = 4.20 in the first conformation;
+    // covalently coupled (not titrating) in the second; absent in the third.
+    var titrating = Group{ .gtype = .coo, .kind = .asp, .residue_idx = 0, .group_atom = 0, .center = zero, .q = -1, .model_pka = 3.8, .desolvation = 0.4, .weight = 0.5 };
+    var coupled = titrating;
+    coupled.coupled_out = true;
+    titrating.center = .{ .x = 2, .y = 0, .z = 0 };
+    const cases = [_]struct { fixes: params_mod.Fixes, predicted: f64, burial: f64 }{
+        // Parity: (4.20 + 99.99 + 0) / 3.
+        .{ .fixes = .none, .predicted = (4.2 + 99.99) / 3.0, .burial = 0.4 / 3.0 },
+        // Q8: absent conformation dropped: (4.20 + 99.99) / 2.
+        .{ .fixes = .{ .q8 = true }, .predicted = (4.2 + 99.99) / 2.0, .burial = 0.2 },
+        // Q7: titrating conformation only.
+        .{ .fixes = .{ .q7 = true }, .predicted = 4.2, .burial = 0.4 },
+        .{ .fixes = .{ .q7 = true, .q8 = true }, .predicted = 4.2, .burial = 0.4 },
+    };
+    for (cases) |c| {
+        const p = Parameters{ .fixes = c.fixes };
+        var sum = SiteSum{ .residue_idx = 0, .kind = .asp };
+        addConformation(&sum, titrating, true, p);
+        addConformation(&sum, coupled, false, p);
+        const m = mean(sum, 3, p);
+        try testing.expectApproxEqAbs(c.predicted, m.predicted, 1e-12);
+        try testing.expectApproxEqAbs(c.burial, m.burial, 1e-12);
+        // The centre is always the mean over titrating conformations.
+        try testing.expectApproxEqAbs(@as(f64, 2), m.center.x, 1e-12);
+    }
+    // Not titrating in the first conformation: parity reports the site as
+    // not titrating; Q7 reports the mean of the titrating conformations.
+    for ([_]params_mod.Fixes{ .none, .{ .q7 = true } }) |f| {
+        const p = Parameters{ .fixes = f };
+        var sum = SiteSum{ .residue_idx = 0, .kind = .asp };
+        addConformation(&sum, coupled, true, p);
+        addConformation(&sum, titrating, false, p);
+        const m = mean(sum, 2, p);
+        try testing.expectEqual(!f.q7, m.not_titrating_first);
+        try testing.expectApproxEqAbs(@as(f64, if (f.q7) 4.2 else (4.2 + 99.99) / 2.0), m.predicted, 1e-12);
     }
 }

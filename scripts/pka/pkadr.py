@@ -194,6 +194,8 @@ def predict(
     zreduce: Path,
     out_dir: Path,
     parameters: Path | None = None,
+    engine: str | None = None,
+    extra_args: list[str] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     out_dir.mkdir(parents=True, exist_ok=True)
     reports: dict[str, dict | None] = {}
@@ -218,6 +220,9 @@ def predict(
                 ]
                 if parameters is not None:
                     command += ["--parameters", str(parameters)]
+                if engine is not None:
+                    command += ["--engine", engine]
+                command += extra_args or []
                 subprocess.run(command, check=True, stderr=subprocess.DEVNULL)
                 reports[pdb] = json.loads(out.read_text())
         report = reports[pdb]
@@ -286,6 +291,14 @@ def main() -> None:
     p.add_argument("--zreduce", type=Path, default=Path("zig-out/bin/zreduce"))
     p.add_argument("--reports", type=Path, required=True)
     p.add_argument("--parameters", type=Path, help="zreduce pka parameter JSON")
+    p.add_argument("--engine", help="zreduce pka engine (builtin, empirical, propka)")
+    p.add_argument(
+        "--extra-arg",
+        action="append",
+        default=[],
+        metavar="ARG",
+        help="extra argument appended to the zreduce pka command (repeatable)",
+    )
     p.add_argument("-o", "--output", type=Path, required=True)
 
     args = parser.parse_args()
@@ -308,6 +321,8 @@ def main() -> None:
             args.zreduce,
             args.reports,
             args.parameters,
+            args.engine,
+            args.extra_arg,
         )
         _write_csv(args.output, PREDICTION_FIELDS, joined)
         print(json.dumps(status, indent=2))

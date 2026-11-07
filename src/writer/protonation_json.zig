@@ -210,8 +210,9 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
     try writer.writeAll("\",\n  \"report_kind\": \"pka_prediction\",\n");
     const engine = if (models.len > 0) models[0].prediction.engine else pka.engine_name;
     const builtin_engine = std.mem.eql(u8, engine, pka.engine_name);
-    const empirical_engine = std.mem.eql(u8, engine, pka_empirical.engine_name);
-    try writer.writeAll(if (builtin_engine)
+    const empirical_engine = std.mem.eql(u8, engine, pka_empirical.parity_engine_name);
+    const zhyd_engine = std.mem.eql(u8, engine, pka_empirical.zhyd_engine_name);
+    try writer.writeAll(if (builtin_engine or zhyd_engine)
         "  \"status\": \"experimental_unvalidated\",\n"
     else if (empirical_engine)
         "  \"status\": \"experimental_parity_with_propka3_model\",\n"
@@ -229,6 +230,8 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
         "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"buried_sites_poorly_modeled\"],\n"
     else if (empirical_engine)
         "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"experimental_engine_reproduces_propka3_model_quirks\"],\n"
+    else if (zhyd_engine)
+        "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\", \"experimental_engine_corrects_propka3_model_quirks\"],\n"
     else
         "  \"warnings\": [\"not_for_clinical_or_production_charge_assignment\"],\n");
     try writer.writeAll("  \"models\": [\n");
@@ -358,6 +361,27 @@ test "prediction report escapes input and carries stable schema" {
     const json = out.writer.buffered();
     try testing.expect(std.mem.find(u8, json, "zhyd.protonation.v1") != null);
     try testing.expect(std.mem.find(u8, json, "a\\\"b.cif") != null);
+}
+
+test "prediction report distinguishes empirical parity and zhyd modes" {
+    const mmcif = @import("../mmcif.zig");
+    var mdl = try mmcif.parseModel(testing.allocator, @embedFile("../test_data/his.cif"));
+    defer mdl.deinit();
+    for (mdl.residues.items) |*res| res.entity_type = .polymer;
+    const Case = struct { mode: pka_empirical.Mode, status: []const u8, version: []const u8 };
+    for ([_]Case{
+        .{ .mode = .parity, .status = "experimental_parity_with_propka3_model", .version = "\"zhyd-empirical-v1-parity\"" },
+        .{ .mode = .zhyd, .status = "experimental_unvalidated", .version = "\"zhyd-empirical-v1\"" },
+    }) |c| {
+        var prediction = try pka_empirical.predict(testing.allocator, &mdl, .{ .mode = c.mode });
+        defer prediction.deinit();
+        var out: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer out.deinit();
+        try writePredictionReport(&out.writer, "his.cif", &.{.{ .model_num = 1, .model = &mdl, .prediction = &prediction }});
+        const json = out.writer.buffered();
+        try testing.expect(std.mem.find(u8, json, c.status) != null);
+        try testing.expect(std.mem.find(u8, json, c.version) != null);
+    }
 }
 
 test "applied state report records geometry-selected histidine tautomer" {

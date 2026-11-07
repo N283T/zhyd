@@ -14,15 +14,19 @@ pub const Burial = struct {
 };
 
 /// Count and volume sum around `center`, skipping atoms whose (residue
-/// number, chain) equal those of `group_atom` (insertion code ignored).
+/// number, chain) equal those of `group_atom` (insertion code ignored). With
+/// Q1 only atoms of the group atom's own residue are skipped. Virtual atoms
+/// (Q3 C-terminal oxygen) never count.
 pub fn burial(conf: *const sites.Conformation, group_atom: u32, center: sites.Vec, params: Parameters) Burial {
     const ga = conf.atoms.items[group_atom];
     const min4 = std.math.pow(f64, params.desolv_min_distance, 4);
     var count: f64 = 0;
     var volume: f64 = 0;
     for (conf.atoms.items) |a| {
-        if (!a.isHeavy()) continue;
-        if (a.res_num == ga.res_num and a.chain_key == ga.chain_key) continue;
+        if (!a.isHeavy() or a.virtual) continue;
+        if (params.fixes.q1) {
+            if (a.residue_idx == ga.residue_idx) continue;
+        } else if (a.res_num == ga.res_num and a.chain_key == ga.chain_key) continue;
         const d = a.pos.distance(center);
         if (d < params.desolv_volume_radius) {
             const d4 = d * d * d * d;
@@ -79,6 +83,22 @@ test "desolvation shift by hand" {
     try testing.expectApproxEqAbs(@as(f64, 0.8125), shift(-1, 0.1, 0.5, p), 1e-12);
     // Base on the surface: s = 0.25; shift = 1·−13·0.2·0.25 = −0.65
     try testing.expectApproxEqAbs(@as(f64, -0.65), shift(1, 0.2, 0, p), 1e-12);
+}
+
+test "Q1: same-residue exclusion compares the full residue identity" {
+    var conf = sites.Conformation{ .allocator = testing.allocator };
+    defer conf.deinit();
+    // Group atom in residue 0 (number 1); an oxygen 3 Å away in residue 1
+    // with the same number and chain (an insertion-code variant).
+    try conf.atoms.append(testing.allocator, .{ .pos = .{ .x = 0, .y = 0, .z = 0 }, .element = .o, .residue_idx = 0, .chain_key = 0, .res_num = 1, .order = 0 });
+    try conf.atoms.append(testing.allocator, .{ .pos = .{ .x = 3, .y = 0, .z = 0 }, .element = .o, .residue_idx = 1, .chain_key = 0, .res_num = 1, .order = 1 });
+    const center = sites.Vec{ .x = 0, .y = 0, .z = 0 };
+    // Parity: the variant shares (number, chain) and is skipped.
+    try testing.expectEqual(@as(f64, 0), burial(&conf, 0, center, .{}).count);
+    // Q1: it is another residue and counts, with volume 1.00 / 3⁴.
+    const b = burial(&conf, 0, center, .{ .fixes = .{ .q1 = true } });
+    try testing.expectEqual(@as(f64, 1), b.count);
+    try testing.expectApproxEqAbs(1.0 / 81.0, b.volume, 1e-15);
 }
 
 test "volume sum uses relative volumes and the 2.75 Å floor" {

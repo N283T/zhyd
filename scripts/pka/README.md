@@ -46,6 +46,11 @@ python3 scripts/pka/pkadr.py predict canonical.csv --structures structures/ \
 python3 scripts/pka/evaluate.py predictions.csv --output metrics.json
 ```
 
+`predict --engine NAME` selects the zreduce pKa engine, and `--extra-arg ARG`
+(repeatable) appends options to the `zreduce pka` command, e.g.
+`--engine empirical --extra-arg=--empirical-fixes --extra-arg=Q2,Q7` for one
+ablation run of the empirical engine.
+
 `normalize` keeps numeric, PDB-mapped entries for supported sites and records
 what it excluded. `cluster_id` joins PDB ids linked by PKAD-R's
 `Sequence_Identity_>_30%` and `Alternative_PDBs` columns or by protein name, so

@@ -6,8 +6,89 @@
 
 const std = @import("std");
 const pka = @import("../pka.zig");
+const AtomType = @import("../element.zig").AtomType;
 
 pub const parity_version = "zhyd-empirical-v1-parity";
+/// Version of zhyd mode with the adopted correction set.
+pub const zhyd_version = "zhyd-empirical-v1";
+
+/// zhyd-mode corrections of the parity quirks ("Known parity quirks"), one
+/// switch each. All off reproduces parity mode exactly.
+pub const Fixes = packed struct(u8) {
+    /// Same-residue exclusion compares the full residue identity.
+    q1: bool = false,
+    /// F_angle = max(0, cos).
+    q2: bool = false,
+    /// The chain-last amino-acid residue is a C-terminus without OXT.
+    q3: bool = false,
+    /// N-termini follow zreduce chains and chain-break detection.
+    q4: bool = false,
+    /// Monatomic metal ions by element.
+    q5: bool = false,
+    /// Waters removed by zreduce's classification (already part of the
+    /// parity input, so no further effect).
+    q6: bool = false,
+    /// Conformation mean over the conformations where the site titrates.
+    q7: bool = false,
+    /// Insertion codes: full residue identity in conformation matching, no
+    /// last-of-family shadowing, absent conformations do not count.
+    q8: bool = false,
+
+    pub const none: Fixes = .{};
+    pub const names = [_][]const u8{ "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8" };
+
+    pub fn bits(self: Fixes) u8 {
+        return @bitCast(self);
+    }
+
+    pub fn fromBits(b: u8) Fixes {
+        return @bitCast(b);
+    }
+
+    pub fn isNone(self: Fixes) bool {
+        return self.bits() == 0;
+    }
+
+    /// Parse a comma-separated list such as "Q2,Q7" (case-insensitive) or
+    /// "none".
+    pub fn parse(list: []const u8) error{InvalidFix}!Fixes {
+        if (std.ascii.eqlIgnoreCase(list, "none")) return .none;
+        var b: u8 = 0;
+        var it = std.mem.splitScalar(u8, list, ',');
+        while (it.next()) |raw| {
+            const item = std.mem.trim(u8, raw, " ");
+            const i = for (names, 0..) |n, i| {
+                if (std.ascii.eqlIgnoreCase(n, item)) break i;
+            } else return error.InvalidFix;
+            b |= @as(u8, 1) << @intCast(i);
+        }
+        return fromBits(b);
+    }
+};
+
+/// "zhyd-empirical-v1" followed by "+Qn" for every enabled correction, for
+/// every possible correction set (index: `Fixes.bits()`).
+const custom_versions: [256][]const u8 = blk: {
+    @setEvalBranchQuota(100_000);
+    var table: [256][]const u8 = undefined;
+    for (0..256) |i| {
+        var v: []const u8 = zhyd_version;
+        for (Fixes.names, 0..) |n, k| {
+            if ((i >> k) & 1 == 1) v = v ++ "+" ++ n;
+        }
+        table[i] = v;
+    }
+    break :blk table;
+};
+
+/// Parameter version of a correction set: parity for none, the zhyd version
+/// for the adopted set, otherwise the zhyd version with the enabled
+/// corrections appended (e.g. "zhyd-empirical-v1+Q2+Q7").
+pub fn versionFor(fixes: Fixes, adopted: Fixes) []const u8 {
+    if (fixes.isNone()) return parity_version;
+    if (fixes.bits() == adopted.bits()) return zhyd_version;
+    return custom_versions[fixes.bits()];
+}
 
 /// Group types of the model ("Group geometry" table).
 pub const GroupType = enum {
@@ -66,6 +147,11 @@ pub const PairClass = enum { none, iterative, non_iterative };
 
 pub const Parameters = struct {
     version: []const u8 = parity_version,
+    /// zhyd-mode corrections; none in parity mode.
+    fixes: Fixes = .{},
+    /// Residues after a chain break are termini (zreduce `--nterm
+    /// aggressive`); used by Q3 and Q4 only.
+    break_termini: bool = false,
 
     // Internal hydrogens
     nh_length: f64 = 1.01,
@@ -291,6 +377,48 @@ test "cut-off table is symmetric with a 3/4 default" {
     try testing.expectEqual(@as(f64, 2.85), sideChainCutoffs(.coo, .arg).c2);
     try testing.expectEqual(@as(f64, 3.0), sideChainCutoffs(.lys, .lys).c1);
     try testing.expectEqual(@as(f64, 4.0), sideChainCutoffs(.his, .his).c2);
+}
+
+test "correction sets parse and name their version" {
+    const f = try Fixes.parse("Q2,q7");
+    try testing.expect(f.q2 and f.q7 and !f.q1);
+    try testing.expectEqual(@as(u8, 0b0100_0010), f.bits());
+    try testing.expect((try Fixes.parse("none")).isNone());
+    try testing.expectError(error.InvalidFix, Fixes.parse("Q9"));
+    try testing.expectError(error.InvalidFix, Fixes.parse(""));
+    try testing.expectEqualStrings("zhyd-empirical-v1+Q2+Q7", versionFor(f, .{ .q1 = true }));
+    try testing.expectEqualStrings(zhyd_version, versionFor(f, f));
+    try testing.expectEqualStrings(parity_version, versionFor(.none, f));
+}
+
+/// Default charge of a monatomic metal ion by element (Q5); null for
+/// elements that are not treated as free ions.
+pub fn metalCharge(element: AtomType) ?f64 {
+    return switch (element) {
+        .Li, .Na, .K, .Rb, .Cs, .Ag => 1.0,
+        .Mg, .Ca, .Sr, .Ba, .Mn, .Co, .Ni, .Cu, .Zn, .Cd, .Hg, .Pb => 2.0,
+        .Fe => 3.0,
+        else => null,
+    };
+}
+
+/// Charge of a monatomic ion residue under Q5: the parity ion table, a few
+/// CCD ids that name another oxidation state, else the element default.
+pub fn ionChargeByElement(comp_id: []const u8, element: AtomType) ?f64 {
+    if (ionCharge(comp_id)) |q| return q;
+    const named = std.StaticStringMap(f64).initComptime(.{
+        .{ "CU1", 1.0 }, .{ "MN3", 3.0 }, .{ "CO3", 3.0 }, .{ "3CO", 3.0 }, .{ "FE2", 2.0 },
+    });
+    if (named.get(comp_id)) |q| return q;
+    return metalCharge(element);
+}
+
+test "ion charges by element" {
+    try testing.expectEqual(@as(?f64, 2.0), ionChargeByElement("ZN2", .Zn));
+    try testing.expectEqual(@as(?f64, 1.0), ionChargeByElement("CU1", .Cu));
+    try testing.expectEqual(@as(?f64, 3.0), ionChargeByElement("FE", .Fe));
+    try testing.expectEqual(@as(?f64, -1.0), ionChargeByElement("CL", .Cl));
+    try testing.expectEqual(@as(?f64, null), ionChargeByElement("XYZ", .Mo));
 }
 
 test "ion table" {

@@ -32,6 +32,9 @@ pub const Atom = struct {
     order: u32,
     /// For an internal hydrogen: the heavy atom it is bonded to.
     parent: u32 = none,
+    /// Modelled atom absent from the input (Q3 C-terminal oxygen): an
+    /// interaction atom only, never a burial atom.
+    virtual: bool = false,
 
     pub fn nameSlice(self: *const Atom) []const u8 {
         return self.name[0..self.name_len];
@@ -123,8 +126,19 @@ pub const Conformation = struct {
     }
 
     /// True if atoms `a` and `b` are connected by a path of at most
-    /// `max_bonds` bonds.
-    pub fn withinBonds(self: *const Conformation, a: u32, b: u32, max_bonds: u8) bool {
+    /// `max_bonds` bonds. A virtual atom is bonded to its `parent` only.
+    pub fn withinBonds(self: *const Conformation, a_in: u32, b_in: u32, max_bonds_in: u8) bool {
+        var a = a_in;
+        var b = b_in;
+        var max_bonds = max_bonds_in;
+        if (a == b) return true;
+        for ([_]*u32{ &a, &b }) |end| {
+            const atom = self.atoms.items[end.*];
+            if (!atom.virtual) continue;
+            if (max_bonds == 0) return false;
+            end.* = atom.parent;
+            max_bonds -= 1;
+        }
         if (a == b) return true;
         var frontier: [1024]u32 = undefined;
         var visited: [1024]u32 = undefined;
@@ -385,6 +399,37 @@ const Builder = struct {
         try self.addGroup(g);
     }
 
+    /// Q3: C-terminus without OXT. The missing oxygen is modelled at
+    /// `cterm_co_length` from C along −(û_CA + û_O) (in the C, CA, O plane,
+    /// about 120° from both bonds). It is the group atom (bonded to C only,
+    /// ordered as C), an interaction atom and part of the centre, but never
+    /// a burial atom.
+    fn carboxylCtermVirtual(self: *Builder, residue_idx: u32) !void {
+        const c = self.find(residue_idx, "C") orelse return;
+        const o = self.find(residue_idx, "O") orelse return;
+        const ca = self.find(residue_idx, "CA") orelse return;
+        if (!self.bonded(c, o)) return;
+        const heavy = self.conf.atoms.items[c];
+        const v: u32 = @intCast(self.conf.atoms.items.len);
+        try self.conf.atoms.append(self.allocator, .{
+            .pos = hydrogens.bisector(self.pos(c), self.pos(ca), self.pos(o), cterm_co_length),
+            .element = .o,
+            .name = .{ 'O', 'X', 'T', ' ' },
+            .name_len = 3,
+            .residue_idx = heavy.residue_idx,
+            .chain_key = heavy.chain_key,
+            .res_num = heavy.res_num,
+            .order = heavy.order,
+            .parent = c,
+            .virtual = true,
+        });
+        var g = site(.c_term, residue_idx, v, self.mean(&.{ o, v }));
+        g.acid_list.append(o);
+        g.acid_list.append(v);
+        g.base_list = g.acid_list;
+        try self.addGroup(g);
+    }
+
     fn carboxylCterm(self: *Builder, residue_idx: u32) !void {
         const oxt = self.find(residue_idx, "OXT") orelse return;
         const c = self.find(residue_idx, "C") orelse return;
@@ -475,7 +520,9 @@ const Builder = struct {
         try self.addGroup(g);
     }
 
-    fn backbone(self: *Builder, residue_idx: u32, is_nterm: bool) !void {
+    /// `is_cterm_carboxyl`: the residue's C is a Q3 C-terminal carboxyl and
+    /// forms no backbone C=O group.
+    fn backbone(self: *Builder, residue_idx: u32, is_nterm: bool, is_cterm_carboxyl: bool) !void {
         const comp = self.mdl.residues.items[residue_idx].compIdSlice();
         if (!is_nterm and !std.mem.eql(u8, comp, "PRO")) bbn: {
             // Backbone N with exactly two heavy neighbours (previous C, CA).
@@ -490,6 +537,7 @@ const Builder = struct {
             try self.addGroup(g);
         }
         bbc: {
+            if (is_cterm_carboxyl) break :bbc;
             // Backbone C bonded to exactly one oxygen.
             const c = self.find(residue_idx, "C") orelse break :bbc;
             var oxygen: ?u32 = null;
@@ -511,6 +559,8 @@ const Builder = struct {
 /// Heavy atoms closer than or at this distance are bonded (proposed
 /// amendment A2: the oracle bonds C–O at 2.000 Å but not at 2.005 Å).
 pub const bond_max: f64 = 2.0;
+/// C–O length of the modelled Q3 C-terminal oxygen (carboxylate C–O).
+pub const cterm_co_length: f64 = 1.25;
 /// Two sulfur atoms closer than this are bonded (disulfide).
 pub const disulfide_bond_max: f64 = 2.5;
 
@@ -549,7 +599,7 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
         if (altloc) |letter| {
             if (!inConformation(mdl, @intCast(ai), letter)) continue;
         }
-        if (later_conformation and shadowed[atom.residue_idx]) continue;
+        if (later_conformation and shadowed[atom.residue_idx] and !params.fixes.q8) continue;
         const element = elementOf(atom);
         if (element == .h) continue;
         const idx: u32 = @intCast(conf.atoms.items.len);
@@ -573,6 +623,14 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
 
     var b = Builder{ .allocator = allocator, .mdl = mdl, .params = params, .conf = &conf, .ranges = ranges, .chain_keys = chain_keys };
 
+    // zreduce termini (Q3, Q4): the first residue of each zreduce chain is
+    // an N-terminus, the last polymer residue a C-terminus; with
+    // `break_termini` (--nterm aggressive) also the residues after / before
+    // a chain break.
+    const termini = try allocator.alloc(Termini, mdl.residues.items.len);
+    defer allocator.free(termini);
+    markTermini(mdl, termini, params.break_termini);
+
     // N-terminus: first ATOM-record residue after a chain start, a TER (the
     // oracle writes one after every polymer chain) or an OXT.
     var need_nterm = true;
@@ -593,7 +651,18 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
         prev_auth = chain_keys[res.chain_idx];
         prev_polymer = res.entity_type == .polymer;
 
-        if (params_mod.ionCharge(res.compIdSlice())) |q| {
+        if (params.fixes.q5) {
+            // Q5: a non-polymer residue with one heavy atom whose element is
+            // a metal (or halogen) with a known ion charge.
+            if (res.entity_type != .polymer and ranges[ri].end - ranges[ri].start == 1) {
+                const i = ranges[ri].start;
+                const element = mdl.atoms.items[conf.atoms.items[i].order].element_type;
+                if (params_mod.ionChargeByElement(res.compIdSlice(), element)) |q| {
+                    try b.addGroup(.{ .gtype = .ion, .residue_idx = residue_idx, .group_atom = i, .center = b.pos(i), .q = q });
+                    continue;
+                }
+            }
+        } else if (params_mod.ionCharge(res.compIdSlice())) |q| {
             var i = ranges[ri].start;
             while (i < ranges[ri].end) : (i += 1) {
                 try b.addGroup(.{ .gtype = .ion, .residue_idx = residue_idx, .group_atom = i, .center = b.pos(i), .q = q });
@@ -606,8 +675,14 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
 
         // Residues sharing the N-terminal residue's chain and number (other
         // insertion codes) are N-termini too (amendment A12).
+        // Q8 drops the insertion-code family rule.
         var is_nterm = false;
-        if (need_nterm or (nterm_family != null and nterm_family.?.chain == chain_keys[res.chain_idx] and nterm_family.?.num == res.auth_seq_id)) {
+        if (params.fixes.q4) {
+            if (termini[ri].n and b.find(residue_idx, "N") != null) {
+                is_nterm = true;
+                try b.singleAtom(residue_idx, .n_term, "N");
+            }
+        } else if (need_nterm or (!params.fixes.q8 and nterm_family != null and nterm_family.?.chain == chain_keys[res.chain_idx] and nterm_family.?.num == res.auth_seq_id)) {
             if (need_nterm) nterm_family = .{ .chain = chain_keys[res.chain_idx], .num = res.auth_seq_id };
             need_nterm = false;
             if (b.find(residue_idx, "N") != null) {
@@ -615,7 +690,10 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
                 try b.singleAtom(residue_idx, .n_term, "N");
             }
         } else nterm_family = null;
-        try b.backbone(residue_idx, is_nterm);
+        const has_oxt = b.find(residue_idx, "OXT") != null;
+        const virtual_cterm = params.fixes.q3 and !has_oxt and termini[ri].c and
+            b.find(residue_idx, "CA") != null and b.find(residue_idx, "O") != null;
+        try b.backbone(residue_idx, is_nterm, virtual_cterm);
 
         if (std.mem.eql(u8, comp, "ASP")) {
             try b.carboxyl(residue_idx, .asp, "CG", "OD1", "OD2");
@@ -642,10 +720,10 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
         } else if (std.mem.eql(u8, comp, "TRP")) {
             try b.tryptophan(residue_idx);
         }
-        if (b.find(residue_idx, "OXT")) |_| {
+        if (has_oxt) {
             try b.carboxylCterm(residue_idx);
             need_nterm = true;
-        }
+        } else if (virtual_cterm) try b.carboxylCtermVirtual(residue_idx);
     }
 
     // Disulfides: two CYS SG closer than the disulfide distance.
@@ -659,6 +737,30 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
 
     std.mem.sort(Group, conf.groups.items, &conf, groupOrderLess);
     return conf;
+}
+
+const Termini = struct { n: bool = false, c: bool = false };
+
+/// zreduce termini: first residue of each chain and last polymer residue;
+/// with `breaks`, also around `is_chain_break_before` (the same rule as the
+/// hydrogen placer under --nterm aggressive).
+fn markTermini(mdl: *const Model, out: []Termini, breaks: bool) void {
+    @memset(out, .{});
+    for (mdl.chains.items) |chain| {
+        if (chain.residue_end <= chain.residue_start) continue;
+        out[chain.residue_start].n = true;
+        var last: ?u32 = null;
+        var ri = chain.residue_start;
+        while (ri < chain.residue_end) : (ri += 1) {
+            const res = mdl.residues.items[ri];
+            if (res.entity_type == .polymer) last = ri;
+            if (breaks and ri > chain.residue_start and res.is_chain_break_before) {
+                out[ri].n = true;
+                out[ri - 1].c = true;
+            }
+        }
+        if (last) |l| out[l].c = true;
+    }
 }
 
 fn groupOrderLess(conf: *const Conformation, a: Group, b: Group) bool {
@@ -899,4 +1001,233 @@ test "conformations: blank atoms plus the letter, else the first alternate" {
     try testing.expectApproxEqAbs(@as(f64, 0.1), conf_b.atoms.items[1].pos.x, 1e-9);
     try testing.expectEqualStrings("CB", names[4]);
     try testing.expectEqualStrings("CG", names[5]);
+}
+
+const AtomSpec = struct {
+    name: []const u8,
+    element: @import("../element.zig").AtomType,
+    x: f32,
+    y: f32 = 0,
+    z: f32 = 0,
+    altloc: u8 = ' ',
+};
+
+const ResidueSpec = struct {
+    comp: []const u8,
+    num: i32,
+    ins: u8 = ' ',
+    entity: model_mod.residue.EntityType = .polymer,
+    chain_break_before: bool = false,
+    atoms: []const AtomSpec,
+};
+
+/// Model from residue specs; `chain_ends` lists the exclusive end residue
+/// index of each chain (all chains have auth id "A" + index).
+fn specModel(residues: []const ResidueSpec, chain_ends: []const u32) !Model {
+    var mdl = Model.init(testing.allocator);
+    errdefer mdl.deinit();
+    var start: u32 = 0;
+    for (chain_ends, 0..) |end, ci| {
+        var chain = model_mod.Chain{ .residue_start = start, .residue_end = end };
+        const ids = [_][]const u8{ "A", "B", "C" };
+        chain.setAuthAsymId(ids[ci]);
+        try mdl.chains.append(testing.allocator, chain);
+        start = end;
+    }
+    for (residues, 0..) |spec, ri| {
+        const chain_idx: u32 = for (chain_ends, 0..) |end, ci| {
+            if (ri < end) break @intCast(ci);
+        } else unreachable;
+        var res = model_mod.Residue{
+            .auth_seq_id = spec.num,
+            .ins_code = spec.ins,
+            .chain_idx = chain_idx,
+            .entity_type = spec.entity,
+            .is_chain_break_before = spec.chain_break_before,
+            .atom_start = @intCast(mdl.atoms.items.len),
+        };
+        res.setCompId(spec.comp);
+        for (spec.atoms) |a| {
+            var atom = model_mod.Atom{ .pos = .{ .x = a.x, .y = a.y, .z = a.z }, .element_type = a.element, .altloc = a.altloc, .residue_idx = @intCast(ri) };
+            atom.setName(a.name);
+            try mdl.atoms.append(testing.allocator, atom);
+        }
+        res.atom_end = @intCast(mdl.atoms.items.len);
+        try mdl.residues.append(testing.allocator, res);
+    }
+    return mdl;
+}
+
+/// Backbone of an amino acid at offset `x0` (N, CA, C, O; C–O 1.25 Å with
+/// û_O = (0.6, 0.8) and û_CA = (−1, 0) at C).
+fn backboneAtoms(x0: f32) [4]AtomSpec {
+    return .{
+        .{ .name = "N", .element = .N, .x = x0 - 2.9, .y = 0.5 },
+        .{ .name = "CA", .element = .C, .x = x0 - 1.5 },
+        .{ .name = "C", .element = .C, .x = x0 },
+        .{ .name = "O", .element = .O, .x = x0 + 0.75, .y = 1.0 },
+    };
+}
+
+fn countGroups(conf: *const Conformation, gtype: GroupType) usize {
+    var n: usize = 0;
+    for (conf.groups.items) |g| n += @intFromBool(g.gtype == gtype);
+    return n;
+}
+
+test "Q3: chain-last residue without OXT is a C-terminus with a modelled oxygen" {
+    const ala = backboneAtoms(0);
+    var mdl = try specModel(&.{.{ .comp = "ALA", .num = 1, .atoms = &ala }}, &.{1});
+    defer mdl.deinit();
+    // Parity: no OXT, no C-terminus; the C=O is a backbone group.
+    {
+        var conf = try build(testing.allocator, &mdl, null, null, .{});
+        defer conf.deinit();
+        try testing.expect(findGroup(&conf, .coo) == null);
+        try testing.expectEqual(@as(usize, 1), countGroups(&conf, .bbc));
+    }
+    var conf = try build(testing.allocator, &mdl, null, null, .{ .fixes = .{ .q3 = true } });
+    defer conf.deinit();
+    try testing.expectEqual(@as(usize, 0), countGroups(&conf, .bbc));
+    const g = findGroup(&conf, .coo).?;
+    try testing.expectEqual(pka.SiteKind.c_term, g.kind.?);
+    // OXT = C + 1.25 · unit(−(û_CA + û_O)) = 1.25 · (0.4, −0.8)/√0.8
+    //     = (0.559017, −1.118034); centre = mean(O, OXT).
+    const oxt = conf.atoms.items[g.group_atom];
+    try testing.expect(oxt.virtual);
+    try testing.expectApproxEqAbs(@as(f64, 0.5590170), oxt.pos.x, 1e-6);
+    try testing.expectApproxEqAbs(@as(f64, -1.1180340), oxt.pos.y, 1e-6);
+    try testing.expectApproxEqAbs(@as(f64, 0.6545085), g.center.x, 1e-6);
+    try testing.expectApproxEqAbs(@as(f64, -0.0590170), g.center.y, 1e-6);
+    try testing.expectEqual(@as(u8, 2), g.acid_list.len);
+    // The modelled oxygen is bonded to C only: OXT–C–CA is two bonds.
+    const ca = for (conf.atoms.items, 0..) |a, i| {
+        if (std.mem.eql(u8, a.nameSlice(), "CA")) break @as(u32, @intCast(i));
+    } else unreachable;
+    try testing.expect(conf.withinBonds(g.group_atom, ca, 2));
+    try testing.expect(!conf.withinBonds(g.group_atom, ca, 1));
+}
+
+test "Q4: N-termini follow zreduce chains and chain breaks" {
+    const ace = [_]AtomSpec{.{ .name = "C", .element = .C, .x = -20 }};
+    const a1 = backboneAtoms(0);
+    const a2 = backboneAtoms(20);
+    const a3 = backboneAtoms(40);
+    // Chain A: ACE cap, ALA 1, ALA 2. Chain B: ALA 10, ALA 12 after a break.
+    var mdl = try specModel(&.{
+        .{ .comp = "ACE", .num = 0, .atoms = &ace },
+        .{ .comp = "ALA", .num = 1, .atoms = &a1 },
+        .{ .comp = "ALA", .num = 2, .atoms = &a2 },
+        .{ .comp = "ALA", .num = 10, .atoms = &a3 },
+        .{ .comp = "ALA", .num = 12, .chain_break_before = true, .atoms = &backboneAtoms(60) },
+    }, &.{ 3, 5 });
+    defer mdl.deinit();
+    const Case = struct { params: Parameters, nterm: []const u32 };
+    const cases = [_]Case{
+        // Parity: the first ATOM-record residue of each chain (ACE is not one).
+        .{ .params = .{}, .nterm = &.{ 1, 3 } },
+        // Q4: the capped chain has no N-terminus; breaks only when aggressive.
+        .{ .params = .{ .fixes = .{ .q4 = true } }, .nterm = &.{3} },
+        .{ .params = .{ .fixes = .{ .q4 = true }, .break_termini = true }, .nterm = &.{ 3, 4 } },
+    };
+    for (cases) |c| {
+        var conf = try build(testing.allocator, &mdl, null, null, c.params);
+        defer conf.deinit();
+        var found: [4]u32 = undefined;
+        var n: usize = 0;
+        for (conf.groups.items) |g| {
+            if (g.gtype != .nterm) continue;
+            found[n] = g.residue_idx;
+            n += 1;
+        }
+        try testing.expectEqualSlices(u32, c.nterm, found[0..n]);
+    }
+    // Q3 with break termini: the residue before the break is a C-terminus.
+    var conf = try build(testing.allocator, &mdl, null, null, .{ .fixes = .{ .q3 = true }, .break_termini = true });
+    defer conf.deinit();
+    var cterm: [4]u32 = undefined;
+    var n: usize = 0;
+    for (conf.groups.items) |g| {
+        if (g.gtype != .coo) continue;
+        cterm[n] = g.residue_idx;
+        n += 1;
+    }
+    try testing.expectEqualSlices(u32, &.{ 2, 3, 4 }, cterm[0..n]);
+}
+
+test "Q5: monatomic metal ions by element" {
+    const ala = backboneAtoms(0);
+    const zn = [_]AtomSpec{.{ .name = "ZN", .element = .Zn, .x = 10 }};
+    const cluster = [_]AtomSpec{
+        .{ .name = "FE1", .element = .Fe, .x = 20 },
+        .{ .name = "S1", .element = .S, .x = 22 },
+    };
+    const ca = [_]AtomSpec{.{ .name = "CA", .element = .Ca, .x = 30 }};
+    // "XZN" is not in the ion table; "CA" is (calcium, +2).
+    var mdl = try specModel(&.{
+        .{ .comp = "ALA", .num = 1, .atoms = &ala },
+        .{ .comp = "XZN", .num = 101, .entity = .non_polymer, .atoms = &zn },
+        .{ .comp = "FES", .num = 102, .entity = .non_polymer, .atoms = &cluster },
+        .{ .comp = "CA", .num = 103, .entity = .non_polymer, .atoms = &ca },
+    }, &.{4});
+    defer mdl.deinit();
+    for ([_]bool{ false, true }) |q5| {
+        var conf = try build(testing.allocator, &mdl, null, null, .{ .fixes = .{ .q5 = q5 } });
+        defer conf.deinit();
+        var charges: [4]f64 = undefined;
+        var n: usize = 0;
+        for (conf.groups.items) |g| {
+            if (g.gtype != .ion) continue;
+            charges[n] = g.q;
+            n += 1;
+        }
+        // Parity: CA by name only. Q5: XZN (+2 by element) and CA; the
+        // two-atom FES cluster is not an ion.
+        if (q5) try testing.expectEqualSlices(f64, &.{ 2, 2 }, charges[0..n]) else try testing.expectEqualSlices(f64, &.{2}, charges[0..n]);
+    }
+}
+
+test "Q6: zreduce waters are removed in every mode" {
+    const ala = backboneAtoms(0);
+    const wat = [_]AtomSpec{.{ .name = "O", .element = .O, .x = 3 }};
+    var mdl = try specModel(&.{
+        .{ .comp = "ALA", .num = 1, .atoms = &ala },
+        .{ .comp = "SOL", .num = 201, .entity = .water, .atoms = &wat },
+    }, &.{2});
+    defer mdl.deinit();
+    for ([_]bool{ false, true }) |q6| {
+        var conf = try build(testing.allocator, &mdl, null, null, .{ .fixes = .{ .q6 = q6 } });
+        defer conf.deinit();
+        try testing.expectEqual(@as(usize, 4), conf.atoms.items.len);
+    }
+}
+
+test "Q8: insertion-code variants stay present in later conformations" {
+    const asp = [_]AtomSpec{
+        .{ .name = "CG", .element = .C, .x = 0 },
+        .{ .name = "OD1", .element = .O, .x = 0.6, .y = 1.1 },
+        .{ .name = "OD2", .element = .O, .x = 0.6, .y = -1.1 },
+    };
+    const ala = [_]AtomSpec{
+        .{ .name = "CA", .element = .C, .x = 10 },
+        .{ .name = "CB", .element = .C, .x = 11.5, .altloc = 'A' },
+        .{ .name = "CB", .element = .C, .x = 11.5, .y = 0.5, .altloc = 'B' },
+    };
+    // ASP 5 and ALA 5A share chain and number; only ALA has alternates.
+    var mdl = try specModel(&.{
+        .{ .comp = "ASP", .num = 5, .atoms = &asp },
+        .{ .comp = "ALA", .num = 5, .ins = 'A', .atoms = &ala },
+    }, &.{2});
+    defer mdl.deinit();
+    for ([_]bool{ false, true }) |q8| {
+        const p = Parameters{ .fixes = .{ .q8 = q8 } };
+        var conf_a = try build(testing.allocator, &mdl, 'A', 'A', p);
+        defer conf_a.deinit();
+        try testing.expect(findGroup(&conf_a, .coo) != null);
+        // Parity: in conformation B only the last residue of the (chain, 5)
+        // family is present, so the ASP is absent.
+        var conf_b = try build(testing.allocator, &mdl, 'B', 'A', p);
+        defer conf_b.deinit();
+        try testing.expectEqual(q8, findGroup(&conf_b, .coo) != null);
+    }
 }

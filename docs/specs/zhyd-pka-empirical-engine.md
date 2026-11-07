@@ -1,8 +1,9 @@
 # zhyd empirical pKa engine — specification
 
-Status: draft r2 (2026-11-07); parity mode implemented and accepted with
-documented deviations (see [Parity status](#parity-status-r2)); zhyd mode in
-progress. Target: an MIT-licensed protein pKa engine in
+Status: draft r3 (2026-11-07); parity mode implemented and accepted with
+documented deviations (see [Parity status](#parity-status-r2)); zhyd mode
+corrections Q1–Q8 implemented and measured (see
+[zhyd mode ablation](#zhyd-mode-ablation-r3)); CYS recalibration pending. Target: an MIT-licensed protein pKa engine in
 zreduce that first reproduces the PROPKA 3 empirical model ("parity mode") and
 then improves on it ("zhyd mode").
 
@@ -117,8 +118,9 @@ reorganisation; `hydrogen_bond` = side-chain + backbone H-bond determinants;
 
 - Heavy atoms only from the input; existing hydrogens are discarded.
 - Residues named HOH, H2O, SO4, PO4, PEG, EPE, TRS are removed before
-  anything else (parity). zhyd mode additionally removes every residue zreduce
-  classifies as water.
+  anything else (parity), together with every residue zreduce classifies as
+  water (the parity input, see below). zhyd mode therefore has no further
+  water rule to apply (Q6).
 - **Disulfide:** two CYS SG atoms closer than 2.5 Å. Both CYS are not
   titratable and take no part in pair interactions (they still count as
   atoms for desolvation of others). Their reported value is "not titrating";
@@ -491,18 +493,162 @@ These are reproduced in parity mode and corrected in zhyd mode:
 | Q2 | Negative angle cosine counts as a positive H-bond | F_angle = max(0, cos) |
 | Q3 | No C-terminus without OXT | chain-last polymer residue is a C-terminus |
 | Q4 | N-terminus only after TER / chain start; chain breaks ignored | follows zreduce chain-break detection (`--nterm` policy) |
-| Q5 | Ions by residue name only | metals by element and CCD; coordination-aware exclusion (already in zreduce) |
-| Q6 | Crystal waters count as burial atoms (if not removed) | waters removed |
+| Q5 | Ions by residue name only | monatomic metal ions by element; coordination-aware exclusion (already in zreduce) |
+| Q6 | Crystal waters count as burial atoms (if not removed) | waters removed (already part of the parity input; no further effect) |
 | Q7 | Averaging 99.99 for conformations where a site does not titrate yields values like 52.96 | average over titrating conformations only; values outside the physical range flagged `pka_outside_physical_range` |
+| Q8 | Insertion-code artefacts of [Conformations](#conformations): matching ignores the insertion code, only the last residue of a (chain, number) family exists after the first conformation, an absent conformation counts as 0, and N-termini extend to the whole family | full residue identity everywhere; every residue present in every conformation; mean over the conformations in which the site exists |
+
+### zhyd mode rules (r3)
+
+Each correction is a switch; parity mode is all switches off. Rules not
+mentioned here are unchanged from parity mode.
+
+- **Q1 (residue identity).** The desolvation atom set excludes exactly the
+  atoms of the residue that owns G's group atom (chain, residue number and
+  insertion code; equal auth chain ids of different chains are different
+  residues). Insertion-code neighbours with the same number count as
+  burial atoms.
+- **Q2 (angle factor).** Every side-chain H-bond angle factor is
+  F_angle = max(0, cos). For COO–ARG with an ARG nitrogen, the bonded heavy
+  neighbour with the *largest* cosine (not the largest |cos|) is used, then
+  clamped at 0. Backbone H-bonds already drop F_angle ≤ 0.001 and are
+  unchanged.
+- **Q3 (C-terminus without OXT).** The C-termini are the residues with an
+  OXT (as in parity) and, in addition, the last polymer residue of each
+  zreduce chain (label chain) when it is an amino acid without OXT whose
+  CA, C and O are present and whose C–O is bonded. With the zreduce
+  `--nterm aggressive` policy the residue before a chain break is a
+  C-terminus too. The missing oxygen is modelled at 1.25 Å from C along
+  −(û_CA + û_O), where û_CA and û_O are unit vectors from C to CA and to O
+  (in the CA–C–O plane, about 120° from both bonds). The modelled oxygen is
+  the group atom (bonded to C only, in input order at C's position), an
+  interaction atom (acid and base list: O and the modelled oxygen) and part
+  of the centre (their mean). It is not a burial atom of any group. The
+  residue's C forms no backbone C=O group.
+- **Q4 (N-termini).** The N-termini are the first residue of each zreduce
+  chain, when it is an amino acid with an N atom, and, under `--nterm
+  aggressive`, every residue zreduce marks with a chain break before it
+  (`_pdbx_poly_seq_scheme` gaps, or residue-number gaps in PDB input). The
+  parity rules (restart after TER, auth chain change or OXT; insertion-code
+  family) are not used. A chain starting with a cap (ACE, FME, PCA, …) has
+  no N-terminus.
+- **Q5 (ions).** An ion is a non-polymer residue with exactly one heavy atom
+  in the conformation whose charge is known: the residue name in the
+  [ion table](#ions), else CU1 +1, MN3, CO3, 3CO +3, FE2 +2, else by element
+  (Li, Na, K, Rb, Cs, Ag +1; Mg, Ca, Sr, Ba, Mn, Co, Ni, Cu, Zn, Cd, Hg, Pb
+  +2; Fe +3; F, Cl, Br, I −1). Multi-atom residues (clusters, cofactors) are
+  never ions. Metal-coordinated sites are excluded as in parity mode.
+- **Q6 (waters).** No effect: the parity input already drops HOH, H2O and
+  every residue zreduce classifies as water. The switch exists so that the
+  table stays complete.
+- **Q7 (non-titrating conformations).** A site's reported pKa and terms are
+  the mean over the conformations in which it titrates. Conformations where
+  it is absent or does not titrate (covalent coupling, disulfide) do not
+  enter, and 99.99 is never averaged. A site is reported when it titrates in
+  at least one conformation, also if it does not titrate in the first.
+- **Q8 (insertion codes).** Sites are identified and matched across and
+  within conformations by (residue, site type), with the full residue
+  identity including the insertion code. Every residue is present in every
+  conformation (no last-of-family rule), so each residue reports its own
+  value. Without Q7 the mean runs over the conformations in which the site
+  exists (non-titrating ones still enter as 99.99). Only the first residue
+  of the chain is an N-terminus, not its insertion-code family.
+
+### zhyd mode evaluation protocol (r3)
+
+Each correction Qn is a separate switch, so every one can be measured alone.
+`--empirical-mode zhyd` enables the adopted set; `--empirical-fixes LIST`
+(comma-separated `Q1`..`Q8`, or `none`) overrides it for ablation. A
+correction is adopted when it lowers the **train**-split MAE of
+`evaluate.py` without raising any per-residue train MAE by more than 0.05;
+the test split and the SNase stress set are only reported, never used for
+the decision. Corrections that change nothing on PKAD-R are still adopted
+when they are physically motivated (Q1, Q4, Q5) and documented as such.
+
+Baseline on PKAD-R (2026-11-07, 865 matched sites, `_entity` fix applied):
+
+| Engine | train MAE | test MAE | SNase MAE | null train / test |
+|---|---|---|---|---|
+| `propka` | 0.844 | 1.174 | 0.933 | 0.766 / 0.883 |
+| `empirical` parity | 0.851 | 1.170 | 0.924 | 0.766 / 0.883 |
+| `builtin` v0.2 | 0.682 | 0.802 | 1.947 | 0.749 / 0.848 |
+
+CYS dominates the parity error (MAE 5.15 on 32 sites; Q7 artifacts and
+buried thiols), so recalibration of the CYS desolvation and model terms is
+in scope for zhyd mode after Q1–Q8.
+
+### zhyd mode ablation (r3)
+
+PKAD-R, same inputs and split as the baseline, `pkadr.py predict --engine
+empirical --extra-arg=--empirical-fixes --extra-arg=Qn`, model 1. "Sites"
+counts sites whose predicted value changed by more than 10⁻⁴ (added or
+removed sites in brackets) over all 185 reports; MAE values are rounded to
+four decimals to show changes below 0.001.
+
+| Set | train MAE | test MAE | SNase MAE | Sites changed (+added / −removed) | Train per-residue changes |
+|---|---|---|---|---|---|
+| parity | 0.8513 | 1.1701 | 0.9242 | — | — |
+| Q1 | 0.8513 | 1.1701 | 0.9242 | 5 | none |
+| Q2 | 0.8514 | 1.1701 | 0.9240 | 58 | ASP +0.0005 |
+| Q3 | 0.8504 | 1.1701 | 0.9242 | 356 (+152) | C_TERM +0.021 (12 → 13 sites), ASP −0.0015, HIS −0.0008 |
+| Q4 | 0.8522 | 1.1696 | 0.9242 | 29 (−19) | GLU +0.0017, N_TERM +0.001 (12 → 11 sites) |
+| Q5 | 0.8513 | 1.1701 | 0.9242 | 0 | none |
+| Q6 | 0.8513 | 1.1701 | 0.9242 | 0 | none |
+| Q7 | 0.8513 | 0.8165 | 0.9242 | 4 | none |
+| Q8 | 0.8513 | 1.1701 | 0.9242 | 1 | none |
+| all Q1–Q8 | 0.8514 | 0.8160 | 0.9240 | 451 (+152 / −19) | as Q2 + Q3 + Q4 |
+| **adopted** (Q1, Q3, Q5–Q8) | **0.8504** | **0.8165** | **0.9242** | 365 (+152) | C_TERM +0.021, ASP −0.0015, HIS −0.0008 |
+
+Notes:
+
+- Q3 adds 152 C-termini (chain-last residues without OXT); one of them
+  (2ZTA A31) has an experimental value. Its residual raises the C_TERM train
+  MAE by 0.021, within the 0.05 limit.
+- Q4 removes 19 N-termini, all on chains that start with a cap or a
+  modified residue (ACE in 1A93, 1FMH, 1HRC, 1PRW, 1U2U, 2ZTA; PCA in 1QH7,
+  2BUS; FME in six chains of 3WU2); parity mode put an amine on the first
+  standard residue after the cap. Removing
+  the spurious +1 charge raises nearby GLU values (1U2U A1 GLU 4.40 → 4.74,
+  experiment 4.1) and drops the 2ZTA A1 N_TERM site, whose experimental
+  value cannot belong to the acetylated chain in the structure.
+- Q7 changes four sites, all in 1V57 (CYS 109 and 112 of chains A and B,
+  covalently coupled in some conformations). The one with an experimental
+  value is in the test split: A109 52.96 → 5.93 (experiment 3.5); test CYS
+  MAE 9.81 → 3.09. A112 goes from 58.76 to 17.54, a value inside the
+  physical range that is still far too high. The 25 train CYS sites are
+  unaffected (train CYS MAE 3.84), so the train CYS error is buried-thiol
+  error, not averaging.
+- Q1 changes five sites near insertion-code residues (1PPF, 2TGA); Q8 one
+  (1PPF A186B ARG, which no longer shares the value of A186). Q5 finds no
+  monatomic metal outside the parity ion table on PKAD-R.
+
+**Adopted set: Q1, Q3, Q5, Q6, Q7, Q8.** Q3 lowers the train MAE without a
+per-residue regression above 0.05. Q1, Q5, Q6, Q7 and Q8 leave the train
+split unchanged and are physically motivated (Q7 removes non-physical
+averages; Q1, Q8 remove insertion-code artefacts; Q5 makes ions independent
+of residue naming; Q6 is a no-op). Q2 and Q4 raise the train MAE (by 0.0001
+and 0.0009) and are **not adopted**, although both are physically
+motivated; they stay available as switches and should be re-measured after
+CYS recalibration, when larger effects no longer mask them.
 
 ## Implementation layout
 
 - `src/pka_empirical.zig` (public entry) with submodules under
   `src/pka_empirical/`: sites, hydrogens, desolvation, interactions,
   iterative, engine.
-- Engine option `mode: parity | zhyd`; parameter tables as one versioned
-  struct (`zhyd-empirical-v1-parity`, later `zhyd-empirical-v1`).
-- CLI: `zreduce pka --engine empirical`. When it meets the acceptance gates it
+- Engine option `mode: parity | zhyd` and an optional correction set
+  (`Fixes`, one switch per Qn) overriding the mode's set; parameter tables
+  as one versioned struct.
+- Versions: `zhyd-empirical-v1-parity` when no correction is on,
+  `zhyd-empirical-v1` for the adopted set, otherwise `zhyd-empirical-v1`
+  followed by `+Qn` for every enabled correction (e.g.
+  `zhyd-empirical-v1+Q2+Q7`). Engine name `zhyd-empirical (parity)` with
+  report status `experimental_parity_with_propka3_model` when no correction
+  is on, else `zhyd-empirical (zhyd)` with status
+  `experimental_unvalidated`.
+- CLI: `zreduce pka --engine empirical [--empirical-mode parity|zhyd]
+  [--empirical-fixes Q1,..|none]` (default parity; both options are
+  rejected for other engines). When it meets the acceptance gates it
   replaces the current `builtin` (v0.2) engine.
 
 ## Validation
@@ -525,7 +671,7 @@ Gates, in order:
    that, explained or not, do not block zhyd mode once they are recorded.
 3. **Accuracy (G2):** zhyd mode on the cluster split (`evaluate.py`): test MAE
    no worse than PROPKA's and below the null model; SNase stress set
-   reported separately. Each zhyd-mode correction (Q1–Q7, recalibration) is
+   reported separately. Each zhyd-mode correction (Q1–Q8, recalibration) is
    evaluated on its own.
 
 ### Parity status (r2)
@@ -567,3 +713,4 @@ and further work is judged by G2. Unexplained deviations:
 | r1 | 2026-11-06 | Initial protein-only specification |
 | r1.1 | 2026-11-06 | Allow other papers and permissively licensed implementations |
 | r2 | 2026-11-07 | Amendments from the first parity implementation (black-box oracle probes): distance-based bonds and carboxyl atoms, covalent coupling, conformation refinements (uneven alternates, not-titrating averaging, insertion codes, shared identities), planar-pair and bisector H rules, COO–ARG neighbour rule, N-terminus details; Q7 reworded; parity status and deviations D1–D7 |
+| r3 | 2026-11-07 | zhyd mode: Q8 (insertion-code artefacts) added; precise rules for Q1–Q8; Q6 recorded as a no-op of the parity input; evaluation protocol and ablation on PKAD-R; adopted set Q1, Q3, Q5–Q8 (Q2, Q4 not adopted); version and engine naming of correction sets |

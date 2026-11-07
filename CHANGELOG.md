@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with PROPKA used only as a black-box oracle; 99.84 % of 19,598 protein
   sites on 185 PKAD-R structures within 0.02 of PROPKA (spec r2 records the
   inferred rules and remaining deviations)
+- zhyd mode of the empirical engine (`--empirical-mode zhyd`, version
+  `zhyd-empirical-v1`): corrections Q1–Q8 of the parity quirks, each behind
+  its own switch (`--empirical-fixes Q1,..|none` for ablation); adopted on
+  the PKAD-R train split: Q1, Q3, Q5–Q8 (spec r3 has the ablation table).
+  Parity remains the default and its output is unchanged
+- `pkadr.py predict --extra-arg ARG` (repeatable) passes extra options to
+  `zreduce pka`
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)
   - `-s, --sdf PATH` flag on `run` and `batch` subcommands
   - Multiple molecules per file (separated by `$$$$`), molecule name used as comp_id

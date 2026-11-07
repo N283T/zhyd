@@ -36,6 +36,8 @@ const PkaConfig = struct {
     parameters_path: ?[]const u8 = null,
     engine: ?PkaEngine = null,
     propka_keep_waters: bool = false,
+    empirical_mode: ?zreduce.pka_empirical.Mode = null,
+    empirical_fixes: ?zreduce.pka_empirical.Fixes = null,
 };
 
 const PkaEngine = enum {
@@ -331,6 +333,26 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
                 std.debug.print("Error: unknown --engine '{s}' (use 'builtin', 'empirical' or 'propka')\n", .{args[i]});
                 std.process.exit(1);
             };
+        } else if (std.mem.eql(u8, arg, "--empirical-mode")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --empirical-mode requires 'parity' or 'zhyd'\n", .{});
+                std.process.exit(1);
+            }
+            config.empirical_mode = std.meta.stringToEnum(zreduce.pka_empirical.Mode, args[i]) orelse {
+                std.debug.print("Error: unknown --empirical-mode '{s}' (use 'parity' or 'zhyd')\n", .{args[i]});
+                std.process.exit(1);
+            };
+        } else if (std.mem.eql(u8, arg, "--empirical-fixes")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --empirical-fixes requires a list such as 'Q2,Q7' or 'none'\n", .{});
+                std.process.exit(1);
+            }
+            config.empirical_fixes = zreduce.pka_empirical.Fixes.parse(args[i]) catch {
+                std.debug.print("Error: invalid --empirical-fixes '{s}' (comma-separated Q1..Q8, or 'none')\n", .{args[i]});
+                std.process.exit(1);
+            };
         } else if (std.mem.eql(u8, arg, "--parameters")) {
             i += 1;
             if (i >= args.len) {
@@ -414,6 +436,10 @@ fn printPkaUsage() void {
         \\                       -Dpropka=true), 'empirical' (experimental MIT engine,
         \\                       parity with the PROPKA 3 model) or 'builtin'
         \\                       (experimental zhyd model)
+        \\    --empirical-mode MODE  Empirical engine: 'parity' (default; PROPKA 3 model,
+        \\                       quirks included) or 'zhyd' (adopted corrections)
+        \\    --empirical-fixes LIST  Override the empirical corrections: comma-separated
+        \\                       Q1..Q8 (e.g. 'Q2,Q7') or 'none' (ablation)
         \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file
         \\                       reproduction; default drops them like PDB2PQR)
         \\
@@ -841,10 +867,22 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         std.debug.print("Error: --parameters and --model-only apply to --engine builtin only\n", .{});
         std.process.exit(1);
     }
+    if (engine != .empirical and (config.empirical_mode != null or config.empirical_fixes != null)) {
+        std.debug.print("Error: --empirical-mode and --empirical-fixes apply to --engine empirical only\n", .{});
+        std.process.exit(1);
+    }
+    const empirical_options = zreduce.pka_empirical.Options{
+        .mode = config.empirical_mode orelse .parity,
+        .fixes = config.empirical_fixes,
+    };
+    const empirical_fixes = empirical_options.effectiveFixes();
     switch (engine) {
         .builtin => std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version}),
         .propka => std.debug.print("note: pKa engine {s}; states are reported, not applied to coordinates\n", .{zreduce.pka_propka.engine_version}),
-        .empirical => std.debug.print("warning: pKa engine {s} ({s}) is experimental; states are reported, not applied to coordinates\n", .{ zreduce.pka_empirical.engine_name, zreduce.pka_empirical.parameter_version }),
+        .empirical => std.debug.print("warning: pKa engine {s} ({s}) is experimental; states are reported, not applied to coordinates\n", .{
+            zreduce.pka_empirical.engineName(empirical_fixes),
+            zreduce.pka_empirical.params.versionFor(empirical_fixes, zreduce.pka_empirical.zhyd_fixes),
+        }),
     }
     const prediction_config = zreduce.pka.Config{
         .parameters = parameters,
@@ -875,7 +913,7 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         defer allocator.free(reports);
         for (entries.items, 0..) |*entry, i| {
             zreduce.place.applyChemistry(&entry.model);
-            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }) catch |err| {
+            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }, empirical_options) catch |err| {
                 std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
                 std.process.exit(1);
             };
@@ -904,7 +942,7 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         defer allocator.free(reports);
         for (parsed.entries.items, 0..) |*entry, i| {
             zreduce.place.applyChemistry(&entry.model);
-            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }) catch |err| {
+            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }, empirical_options) catch |err| {
                 std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
                 std.process.exit(1);
             };
@@ -924,11 +962,12 @@ fn runPkaEngine(
     mdl: *const zreduce.model.Model,
     config: zreduce.pka.Config,
     propka_options: zreduce.pka_propka.Options,
+    empirical_options: zreduce.pka_empirical.Options,
 ) !zreduce.pka.Prediction {
     return switch (engine) {
         .builtin => zreduce.pka.predict(allocator, mdl, config),
         .propka => zreduce.pka_propka.predict(allocator, mdl, propka_options),
-        .empirical => zreduce.pka_empirical.predict(allocator, mdl, .{}),
+        .empirical => zreduce.pka_empirical.predict(allocator, mdl, empirical_options),
     };
 }
 
