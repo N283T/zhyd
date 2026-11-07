@@ -68,6 +68,7 @@ zreduce run input.cif -o output.cif --fix fix.txt
 zreduce batch input_dir/ -o output_dir/
 zreduce batch input_dir/ -d components.cif --jsonl log.jsonl
 zreduce batch input_dir/ -j 4
+zreduce batch input_dir/ -o output_dir/ --timing   # per-stage timing to stderr
 
 # Precompile a CCD dictionary
 zreduce compile-dict components.cif -o components.zccd
@@ -75,6 +76,7 @@ zreduce compile-dict components.cif -o components.zccd
 # Experimental pKa report (does not change coordinates)
 zreduce pka input.cif -o pka.json
 zreduce pka input.cif --model-only -o model-pka-baseline.json
+zreduce pka input_dir/ -o pka_dir/ -j 8 --jsonl pka.jsonl   # one <stem>.json per file
 ```
 
 ## Commands
@@ -82,7 +84,7 @@ zreduce pka input.cif --model-only -o model-pka-baseline.json
 ```text
 zreduce run [OPTIONS] <input.cif|input.pdb>
 zreduce batch [OPTIONS] <input_dir>
-zreduce pka [OPTIONS] <input.cif|input.pdb>
+zreduce pka [OPTIONS] <input.cif|input.pdb|input_dir>
 zreduce compile-dict [OPTIONS] <input.cif>
 ```
 
@@ -107,6 +109,7 @@ Common `run` and `batch` options:
 | `--isotope NAME` | `hydrogen`/`h` or `deuterium`/`d` |
 | `--nterm MODE` | `auto`, `aggressive`, or `neutral` |
 | `--model VALUE` | `all` or a model number |
+| `--timing` | Per-stage timing breakdown and wall time on stderr (also `pka`) |
 
 Batch-only options:
 
@@ -115,6 +118,20 @@ Batch-only options:
 | `-j, --threads N` | Thread count |
 | `--quiet` | Suppress progress output |
 | `--gz` | Write gzip-compressed output (`.cif.gz`) |
+
+`--timing` in batch mode sums each stage over the files (so stage sums can
+exceed the wall time with several threads) and adds the file count and
+throughput. Machine-readable `<CMD>_<STAGE>_TIME_MS:` lines follow the table.
+
+Given a directory, `zreduce pka` writes `<output_dir>/<stem>.json` (default
+`<input_dir>_pka/`) for every `.cif`, `.pdb` or `.ent` file, optionally
+gzipped. Each report is byte-identical to `zreduce pka <input_dir>/<file> -o
+<output_dir>/<stem>.json` with the same options. Parameter files are loaded
+once and files run in parallel (`-j N`; `--engine propka` always runs on one
+thread). `--jsonl PATH` logs one line per file (`input`, `output`, `status`,
+`n_sites`, `seconds`, `error`). A failing file does not stop the batch, but the
+exit status is non-zero; when two files share a stem (`x.cif`, `x.cif.gz`) the
+first in name order is processed and the other is reported as failed.
 
 ## Control files
 

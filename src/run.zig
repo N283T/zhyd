@@ -7,6 +7,8 @@ fn defaultIo() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
 }
 const zreduce = @import("root.zig");
+const StageTimes = zreduce.timing.StageTimes;
+const Stopwatch = zreduce.timing.Stopwatch;
 
 pub const ProcessConfig = struct {
     input_path: []const u8,
@@ -44,6 +46,8 @@ pub const ProcessResult = struct {
     n_singletons: u32 = 0,
     n_brute_force: u32 = 0,
     n_vertex_cut: u32 = 0,
+    /// Per-stage wall time of this file (printed with --timing).
+    timing: StageTimes = .{},
 
     pub fn totalSkipped(self: ProcessResult) u32 {
         return self.n_skipped_existing + self.n_skipped_inter_residue + self.n_skipped_missing_ref + self.n_skipped_quality_filter;
@@ -137,6 +141,7 @@ fn processModelShared(
     mover_snapshots: *std.ArrayListUnmanaged(zreduce.writer.json_writer.MoverSnapshot),
     result: *ProcessResult,
     config: ProcessConfig,
+    sw: *Stopwatch,
 ) !void {
     if (!config.quiet and n_models > 1) {
         std.debug.print("  Processing model {d} ({d} atoms)\n", .{ model_num, mdl.atoms.items.len });
@@ -147,6 +152,7 @@ fn processModelShared(
         .protonation = protonation_overrides,
         .nterm_mode = config.nterm_mode,
     });
+    sw.lapInto(&result.timing, .chemistry);
 
     // Place hydrogens
     const place_result = try zreduce.place.addHydrogensWithConfig(
@@ -169,6 +175,7 @@ fn processModelShared(
     result.n_skipped_missing_ref += place_result.n_skipped_missing_ref;
     result.n_skipped_quality_filter += place_result.n_skipped_quality_filter;
     result.n_distance_derived += place_result.n_distance_derived;
+    sw.lapInto(&result.timing, .place);
 
     // Generate movers and optimize
     const needs_movers = !config.no_opt or config.fix_path != null or config.dump_movers_path != null;
@@ -232,6 +239,7 @@ fn processModelShared(
 
     // Mark absent H atoms
     markAbsentHydrogens(mdl);
+    sw.lapInto(&result.timing, .optimize);
 
     // Validate
     {
@@ -245,6 +253,7 @@ fn processModelShared(
             }
         }
     }
+    sw.lapInto(&result.timing, .validate);
 }
 
 fn markAbsentHydrogens(mdl: *zreduce.model.Model) void {
@@ -267,17 +276,22 @@ fn countAddedHydrogens(mdl: *const zreduce.model.Model) u32 {
 /// Errors are returned (not exit'd) -- the caller decides how to handle them.
 pub fn processFile(allocator: Allocator, config: ProcessConfig) !ProcessResult {
     // 1. Read input
+    var sw = Stopwatch.start();
     const source = try readFile(allocator, config.input_path);
     defer allocator.free(source);
+    var read_times = StageTimes{};
+    sw.lapInto(&read_times, .read);
 
-    return switch (config.format) {
-        .mmcif => processFileMmcif(allocator, config, source),
-        .pdb => processFilePdb(allocator, config, source),
+    var result = try switch (config.format) {
+        .mmcif => processFileMmcif(allocator, config, source, &sw),
+        .pdb => processFilePdb(allocator, config, source, &sw),
     };
+    result.timing.merge(read_times);
+    return result;
 }
 
 /// mmCIF pipeline: supports multi-model processing.
-fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const u8) !ProcessResult {
+fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const u8, stopwatch: *Stopwatch) !ProcessResult {
     // 2. Parse CIF document (for preserving non-atom_site categories in output)
     var doc = try zreduce.cif.readString(allocator, source);
     defer doc.deinit();
@@ -332,6 +346,8 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     defer if (inline_dict) |*d| d.deinit();
     const block = &doc.blocks.items[0];
     inline_dict = try zreduce.mmcif.parseInlineComponents(allocator, block);
+    var parse_times = StageTimes{};
+    stopwatch.lapInto(&parse_times, .parse);
 
     // Parse overrides (once — shared across models)
     var protonation_overrides: ?zreduce.place.ProtonationOverrides = null;
@@ -359,7 +375,9 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
         .n_skipped_existing = 0,
         .n_skipped_inter_residue = 0,
         .n_skipped_missing_ref = 0,
+        .timing = parse_times,
     };
+    stopwatch.lapInto(&result.timing, .load);
 
     // Accumulate mover snapshots for JSON log (movers are freed per model)
     var mover_snapshots = std.ArrayListUnmanaged(zreduce.writer.json_writer.MoverSnapshot).empty;
@@ -376,6 +394,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
         try zreduce.mmcif.parseStructConn(mdl, block, &atom_lookup);
         try zreduce.mmcif.parseBranchLinks(allocator, mdl, block, &atom_lookup);
         zreduce.mmcif.flagLeavingAtoms(mdl, if (inline_dict) |*d| d else null, config.dict);
+        stopwatch.lapInto(&result.timing, .parse);
 
         // Shared per-model pipeline: chemistry → place → movers/opt → markAbsent → validate → snapshot
         try processModelShared(
@@ -389,6 +408,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
             &mover_snapshots,
             &result,
             config,
+            stopwatch,
         );
     }
 
@@ -455,14 +475,17 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
             config.nterm_mode,
         );
     }
+    stopwatch.lapInto(&result.timing, .write);
 
     return result;
 }
 
 /// PDB pipeline: supports multi-model processing.
-fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u8) !ProcessResult {
+fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u8, stopwatch: *Stopwatch) !ProcessResult {
     var pdb_result = try zreduce.pdb.parseAll(allocator, source, config.model_filter);
     defer pdb_result.deinit(allocator);
+    var parse_times = StageTimes{};
+    stopwatch.lapInto(&parse_times, .parse);
 
     if (pdb_result.entries.items.len == 0) {
         if (!config.quiet) std.debug.print("  No models found matching filter\n", .{});
@@ -500,7 +523,9 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
         .n_skipped_existing = 0,
         .n_skipped_inter_residue = 0,
         .n_skipped_missing_ref = 0,
+        .timing = parse_times,
     };
+    stopwatch.lapInto(&result.timing, .load);
 
     var mover_snapshots = std.ArrayListUnmanaged(zreduce.writer.json_writer.MoverSnapshot).empty;
     defer mover_snapshots.deinit(allocator);
@@ -515,6 +540,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
                 std.debug.print("  Model {d}: stripped {d} existing H atoms\n", .{ entry.model_num, n_stripped });
             }
         }
+        stopwatch.lapInto(&result.timing, .parse);
 
         // Shared per-model pipeline: chemistry → place → movers/opt → markAbsent → validate → snapshot
         try processModelShared(
@@ -528,6 +554,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
             &mover_snapshots,
             &result,
             config,
+            stopwatch,
         );
     }
 
@@ -589,6 +616,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
             config.nterm_mode,
         );
     }
+    stopwatch.lapInto(&result.timing, .write);
 
     return result;
 }

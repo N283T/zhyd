@@ -35,11 +35,51 @@ def cluster_split(cluster_id: str, seed: str, train_fraction: float) -> str:
     return "train" if fraction < train_fraction else "test"
 
 
+# Engine-independent reference pKa (PROPKA 3 model values), used for the
+# experimental-shift strata, the fixed null model and the state-flip count, so
+# that these do not move when an engine recalibrates its own model pKa.
+REFERENCE_PKA = {
+    "ASP": 3.8,
+    "GLU": 4.5,
+    "HIS": 6.5,
+    "LYS": 10.5,
+    "ARG": 12.5,
+    "CYS": 9.0,
+    "TYR": 10.0,
+    "N_TERM": 8.0,
+    "C_TERM": 3.2,
+}
+STATE_PH = 7.0
+SHIFT_BINS = ((0.0, 0.5, "<0.5"), (0.5, 1.0, "0.5-1"), (1.0, 2.0, "1-2"))
+
+
+def reference_pka(row: dict[str, str]) -> float:
+    site = row.get("comp_id") or row.get("site") or ""
+    return REFERENCE_PKA.get(site.upper(), float(row["model_pka"]))
+
+
+def shift_bin(row: dict[str, str]) -> str:
+    shift = abs(float(row["experimental_pka"]) - reference_pka(row))
+    for low, high, label in SHIFT_BINS:
+        if low <= shift < high:
+            return label
+    return ">=2"
+
+
 def metrics(
     rows: list[dict[str, str]], predicted_key: str = "predicted_pka"
 ) -> dict[str, float | int | None]:
     if not rows:
-        return {"n": 0, "mae": None, "rmse": None, "shift_direction_accuracy": None}
+        return {
+            "n": 0,
+            "mae": None,
+            "rmse": None,
+            "shift_direction_accuracy": None,
+            "reference_null_mae": None,
+            "state_accuracy": None,
+            "state_flips": 0,
+            "state_flips_correct": 0,
+        }
     errors = [
         float(row[predicted_key]) - float(row["experimental_pka"]) for row in rows
     ]
@@ -50,9 +90,33 @@ def metrics(
         predicted_shift = float(row[predicted_key]) - model
         if abs(experimental_shift) >= 0.1:
             directions.append((experimental_shift > 0) == (predicted_shift > 0))
+
+    # Protonation state at STATE_PH: protonated when pKa > pH. A "flip" is a
+    # site whose experimental state differs from the reference-pKa state; the
+    # null model gets none of them right by construction.
+    def protonated(value: float) -> bool:
+        return value > STATE_PH
+
+    states = [
+        protonated(float(row[predicted_key]))
+        == protonated(float(row["experimental_pka"]))
+        for row in rows
+    ]
+    flips = [
+        i
+        for i, row in enumerate(rows)
+        if protonated(reference_pka(row)) != protonated(float(row["experimental_pka"]))
+    ]
     return {
         "n": len(rows),
         "mae": sum(abs(value) for value in errors) / len(errors),
+        "reference_null_mae": sum(
+            abs(reference_pka(row) - float(row["experimental_pka"])) for row in rows
+        )
+        / len(rows),
+        "state_accuracy": sum(states) / len(states),
+        "state_flips": len(flips),
+        "state_flips_correct": sum(states[i] for i in flips),
         "rmse": math.sqrt(sum(value * value for value in errors) / len(errors)),
         "shift_direction_accuracy": (sum(directions) / len(directions))
         if directions
@@ -66,6 +130,9 @@ STRATA = (
         "exposure",
         lambda row: "buried" if float(row["burial_fraction"]) >= 0.5 else "surface",
     ),
+    # |experimental - reference pKa|: most sites barely shift, which is why
+    # the null model is hard to beat on MAE overall.
+    ("experimental_shift", shift_bin),
 )
 
 

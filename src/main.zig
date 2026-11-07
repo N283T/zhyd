@@ -26,6 +26,7 @@ const RunConfig = struct {
     dump_movers_path: ?[]const u8 = null,
     strip_h: bool = false,
     model_filter: zreduce.run.ModelFilter = .all,
+    show_timing: bool = false,
 };
 
 const PkaConfig = struct {
@@ -38,19 +39,14 @@ const PkaConfig = struct {
     propka_keep_waters: bool = false,
     empirical_mode: ?zreduce.pka_empirical.Mode = null,
     empirical_fixes: ?zreduce.pka_empirical.Fixes = null,
+    show_timing: bool = false,
+    // Directory input only:
+    n_threads: ?u32 = null,
+    jsonl_path: ?[]const u8 = null,
+    quiet: bool = false,
 };
 
-const PkaEngine = enum {
-    builtin,
-    propka,
-    empirical,
-
-    /// PROPKA when compiled in (zig build -Dpropka=true), else the MIT
-    /// empirical engine.
-    fn default() PkaEngine {
-        return if (zreduce.pka_propka.available) .propka else .empirical;
-    }
-};
+const PkaEngine = zreduce.pka_run.Engine;
 
 /// Fields shared between RunConfig and BatchConfig, parsed by parseCommonOption.
 const CommonOptions = struct {
@@ -269,6 +265,8 @@ fn parseRunArgs(args: []const []const u8) ?RunConfig {
             config.dump_movers_path = args[i];
         } else if (std.mem.eql(u8, arg, "--validate")) {
             config.validate = true;
+        } else if (std.mem.eql(u8, arg, "--timing")) {
+            config.show_timing = true;
         } else if (parseCommonOption(args, &i, &common)) {
             // consumed by parseCommonOption
         } else if (arg.len > 0 and arg[0] == '-') {
@@ -322,6 +320,27 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
             config.output_path = args[i];
         } else if (std.mem.eql(u8, arg, "--model-only")) {
             config.model_only = true;
+        } else if (std.mem.eql(u8, arg, "--timing")) {
+            config.show_timing = true;
+        } else if (std.mem.eql(u8, arg, "--quiet")) {
+            config.quiet = true;
+        } else if (std.mem.eql(u8, arg, "--jsonl")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --jsonl requires a path\n", .{});
+                std.process.exit(1);
+            }
+            config.jsonl_path = args[i];
+        } else if (std.mem.eql(u8, arg, "-j") or std.mem.eql(u8, arg, "--threads")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: {s} requires a number\n", .{arg});
+                std.process.exit(1);
+            }
+            config.n_threads = std.fmt.parseInt(u32, args[i], 10) catch {
+                std.debug.print("Error: invalid thread count '{s}'\n", .{args[i]});
+                std.process.exit(1);
+            };
         } else if (std.mem.eql(u8, arg, "--propka-keep-waters")) {
             config.propka_keep_waters = true;
         } else if (std.mem.eql(u8, arg, "--engine")) {
@@ -406,7 +425,8 @@ fn printUsage(program_name: []const u8) void {
         \\COMMANDS:
         \\    run           Process a single mmCIF or PDB file
         \\    batch         Process all mmCIF/PDB files in a directory
-        \\    pka           Experimental pKa prediction report (does not alter coordinates)
+        \\    pka           Experimental pKa prediction report for a file or a directory
+        \\                  (does not alter coordinates)
         \\    compile-dict  Pre-compile CCD dictionary to binary format
         \\
         \\GLOBAL OPTIONS:
@@ -422,6 +442,7 @@ fn printPkaUsage() void {
     std.debug.print(
         \\USAGE:
         \\    zreduce pka [OPTIONS] <input.cif|input.pdb>
+        \\    zreduce pka [OPTIONS] <input_dir> [-o <output_dir>]
         \\
         \\EXPERIMENTAL:
         \\    Predict pKa values and write a versioned JSON report. This command
@@ -429,7 +450,8 @@ fn printPkaUsage() void {
         \\
         \\OPTIONS:
         \\    -h, --help         Show this help message
-        \\    -o, --output PATH  JSON output (default: stdout)
+        \\    -o, --output PATH  JSON output (default: stdout); for a directory input, the
+        \\                       output directory (default: <input_dir>_pka/)
         \\    --model VALUE      Model selection: 'all' (default) or a number
         \\    --model-only       Emit intrinsic model-pKa baseline without structure terms
         \\    --parameters PATH  JSON parameter set (calibration/research; needs its own "version").
@@ -447,6 +469,18 @@ fn printPkaUsage() void {
         \\                       Q1..Q8 (e.g. 'Q2,Q7') or 'none' (ablation)
         \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file
         \\                       reproduction; default drops them like PDB2PQR)
+        \\    --timing           Print a per-stage timing breakdown to stderr
+        \\
+        \\DIRECTORY INPUT (batch):
+        \\    Every .cif/.pdb/.ent file (optionally .gz) in <input_dir> gets
+        \\    <output_dir>/<stem>.json, identical to a single-file run on
+        \\    <input_dir>/<file>. A failing file does not stop the batch; the exit
+        \\    status is non-zero if any file failed.
+        \\    -j, --threads N    Thread count (default: auto-detect). --engine propka
+        \\                       always runs on 1 thread
+        \\    --jsonl PATH       Per-file JSONL log (input, output, status, n_sites,
+        \\                       seconds, error)
+        \\    --quiet            Suppress progress output
         \\
     , .{});
 }
@@ -469,6 +503,7 @@ fn printRunUsage() void {
         \\    --no-opt           Skip optimization
         \\    --no-flip          Disable Asn/Gln/His flips
         \\    --validate         Print validation diagnostics
+        \\    --timing           Print a per-stage timing breakdown to stderr
         \\    --water            Add water hydrogens (default: off)
         \\    --water-phantom    Allow zero-occupancy phantom water H when orientation is underdetermined
         \\    --water-occ-cutoff N  Skip waters with occupancy below N (default: 0.66)
@@ -570,6 +605,8 @@ fn parseBatchArgs(args: []const []const u8) ?zreduce.batch.BatchConfig {
             };
         } else if (std.mem.eql(u8, arg, "--quiet")) {
             config.quiet = true;
+        } else if (std.mem.eql(u8, arg, "--timing")) {
+            config.show_timing = true;
         } else if (std.mem.eql(u8, arg, "--gz")) {
             config.gzip_output = true;
         } else if (parseCommonOption(args, &i, &common)) {
@@ -624,6 +661,8 @@ fn printBatchUsage() void {
         \\    --no-opt           Skip optimization
         \\    --no-flip          Disable flips
         \\    --quiet            Suppress progress output
+        \\    --timing           Print per-stage timing (summed over files), wall time
+        \\                       and throughput to stderr
         \\    --water            Add water hydrogens (default: off)
         \\    --water-phantom    Allow zero-occupancy phantom water H when orientation is underdetermined
         \\    --water-occ-cutoff N  Skip waters with occupancy below N (default: 0.66)
@@ -761,6 +800,7 @@ fn batchSubcommand(allocator: Allocator, args: []const []const u8) void {
 
 fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     const config = parseRunArgs(args) orelse return;
+    var wall = zreduce.timing.Stopwatch.start();
 
     // Load CCD dictionary (once, before processFile)
     var ccd_dict: ?zreduce.ccd.ComponentDict = null;
@@ -791,6 +831,7 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
         };
     }
     defer if (sdf_dict) |*d| d.deinit();
+    const load_ns = wall.read();
 
     const proc_config = zreduce.run.ProcessConfig{
         .input_path = config.input_path,
@@ -839,16 +880,29 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     if (result.n_skipped_missing_ref > 0) {
         std.debug.print("  warning: {d} H skipped due to missing reference atoms (potential plan bug)\n", .{result.n_skipped_missing_ref});
     }
+    if (config.show_timing) {
+        var stages = result.timing;
+        stages.addNs(.load, load_ns);
+        zreduce.timing.printStageProfile("RUN", &zreduce.batch.run_stages, stages, wall.read(), null);
+    }
 }
 
-fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
-    const config = parsePkaArgs(args) orelse return;
-    const source = zreduce.run.readFile(allocator, config.input_path) catch |err| {
-        std.debug.print("Error: cannot read input '{s}': {s}\n", .{ config.input_path, @errorName(err) });
-        std.process.exit(1);
-    };
-    defer allocator.free(source);
+/// Prediction options resolved from the command line, plus the parsed
+/// parameter files they borrow from.
+const ResolvedPka = struct {
+    options: zreduce.pka_run.Options,
+    parsed_params: ?std.json.Parsed(zreduce.pka.Parameters) = null,
+    parsed_overrides: ?std.json.Parsed(zreduce.pka_empirical.params.Overrides) = null,
 
+    fn deinit(self: *ResolvedPka) void {
+        if (self.parsed_params) |*p| p.deinit();
+        if (self.parsed_overrides) |*p| p.deinit();
+    }
+};
+
+/// Validate engine options, load the parameter file (once) and print the
+/// engine banner. Exits on invalid input.
+fn resolvePkaOptions(allocator: Allocator, config: PkaConfig) ResolvedPka {
     // --model-only is a builtin-engine feature, so it selects that engine.
     const engine = config.engine orelse if (config.model_only) PkaEngine.builtin else PkaEngine.default();
     if (engine == .propka and !zreduce.pka_propka.available) {
@@ -869,10 +923,7 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         std.process.exit(1);
     }
 
-    var parsed_params: ?std.json.Parsed(zreduce.pka.Parameters) = null;
-    defer if (parsed_params) |*p| p.deinit();
-    var parsed_overrides: ?std.json.Parsed(zreduce.pka_empirical.params.Overrides) = null;
-    defer if (parsed_overrides) |*p| p.deinit();
+    var resolved = ResolvedPka{ .options = .{ .engine = engine } };
     if (config.parameters_path) |path| {
         const json = zreduce.run.readFile(allocator, path) catch |err| {
             std.debug.print("Error: cannot read parameters '{s}': {s}\n", .{ path, @errorName(err) });
@@ -880,22 +931,22 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         };
         defer allocator.free(json);
         if (engine == .empirical) {
-            parsed_overrides = zreduce.pka_empirical.params.parseOverrides(allocator, json) catch |err| {
+            resolved.parsed_overrides = zreduce.pka_empirical.params.parseOverrides(allocator, json) catch |err| {
                 std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
                 std.process.exit(1);
             };
         } else {
-            parsed_params = zreduce.pka.parseParameters(allocator, json) catch |err| {
+            resolved.parsed_params = zreduce.pka.parseParameters(allocator, json) catch |err| {
                 std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
                 std.process.exit(1);
             };
         }
     }
-    const parameters: zreduce.pka.Parameters = if (parsed_params) |p| p.value else .{};
+    const parameters: zreduce.pka.Parameters = if (resolved.parsed_params) |p| p.value else .{};
     const empirical_options = zreduce.pka_empirical.Options{
         .mode = empirical_mode,
         .fixes = config.empirical_fixes,
-        .overrides = if (parsed_overrides) |p| p.value else null,
+        .overrides = if (resolved.parsed_overrides) |p| p.value else null,
     };
     switch (engine) {
         .builtin => std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version}),
@@ -905,110 +956,92 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
             empirical_options.parameters().version,
         }),
     }
-    const prediction_config = zreduce.pka.Config{
-        .parameters = parameters,
-        .include_structure_terms = !config.model_only,
-        .include_coupling = !config.model_only,
+    resolved.options = .{
+        .engine = engine,
+        .model_filter = config.model_filter,
+        .prediction_config = .{
+            .parameters = parameters,
+            .include_structure_terms = !config.model_only,
+            .include_coupling = !config.model_only,
+        },
+        .propka_options = .{ .keep_waters = config.propka_keep_waters },
+        .empirical_options = empirical_options,
     };
+    return resolved;
+}
+
+fn isDirectory(path: []const u8) bool {
     const io = defaultIo();
-    var out_buf: [4096]u8 = undefined;
-
-    if (zreduce.run.detectFormat(config.input_path) == .mmcif) {
-        var entries = zreduce.mmcif.parseModels(allocator, source, config.model_filter) catch |err| {
-            std.debug.print("Error: failed to parse mmCIF: {s}\n", .{@errorName(err)});
-            std.process.exit(1);
-        };
-        defer {
-            for (entries.items) |*entry| entry.model.deinit();
-            entries.deinit(allocator);
-        }
-        if (entries.items.len == 0) {
-            std.debug.print("Error: no matching models\n", .{});
-            std.process.exit(1);
-        }
-        const predictions = allocator.alloc(zreduce.pka.Prediction, entries.items.len) catch @panic("out of memory");
-        defer allocator.free(predictions);
-        var predicted: usize = 0;
-        defer for (predictions[0..predicted]) |*prediction| prediction.deinit();
-        const reports = allocator.alloc(zreduce.writer.protonation_json.ReportModel, entries.items.len) catch @panic("out of memory");
-        defer allocator.free(reports);
-        for (entries.items, 0..) |*entry, i| {
-            zreduce.place.applyChemistry(&entry.model);
-            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }, empirical_options) catch |err| {
-                std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
-                std.process.exit(1);
-            };
-            predicted += 1;
-            reports[i] = .{ .model_num = entry.model_num, .model = &entry.model, .prediction = &predictions[i] };
-        }
-        writePkaReport(io, &out_buf, config.output_path, config.input_path, reports) catch |err| {
-            std.debug.print("Error: failed to write pKa report: {s}\n", .{@errorName(err)});
-            std.process.exit(1);
-        };
-    } else {
-        var parsed = zreduce.pdb.parseAll(allocator, source, config.model_filter) catch |err| {
-            std.debug.print("Error: failed to parse PDB: {s}\n", .{@errorName(err)});
-            std.process.exit(1);
-        };
-        defer parsed.deinit(allocator);
-        if (parsed.entries.items.len == 0) {
-            std.debug.print("Error: no matching models\n", .{});
-            std.process.exit(1);
-        }
-        const predictions = allocator.alloc(zreduce.pka.Prediction, parsed.entries.items.len) catch @panic("out of memory");
-        defer allocator.free(predictions);
-        var predicted: usize = 0;
-        defer for (predictions[0..predicted]) |*prediction| prediction.deinit();
-        const reports = allocator.alloc(zreduce.writer.protonation_json.ReportModel, parsed.entries.items.len) catch @panic("out of memory");
-        defer allocator.free(reports);
-        for (parsed.entries.items, 0..) |*entry, i| {
-            zreduce.place.applyChemistry(&entry.model);
-            predictions[i] = runPkaEngine(allocator, engine, &entry.model, prediction_config, .{ .keep_waters = config.propka_keep_waters }, empirical_options) catch |err| {
-                std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)});
-                std.process.exit(1);
-            };
-            predicted += 1;
-            reports[i] = .{ .model_num = entry.model_num, .model = &entry.model, .prediction = &predictions[i] };
-        }
-        writePkaReport(io, &out_buf, config.output_path, config.input_path, reports) catch |err| {
-            std.debug.print("Error: failed to write pKa report: {s}\n", .{@errorName(err)});
-            std.process.exit(1);
-        };
-    }
+    var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch return false;
+    dir.close(io);
+    return true;
 }
 
-fn runPkaEngine(
-    allocator: Allocator,
-    engine: PkaEngine,
-    mdl: *const zreduce.model.Model,
-    config: zreduce.pka.Config,
-    propka_options: zreduce.pka_propka.Options,
-    empirical_options: zreduce.pka_empirical.Options,
-) !zreduce.pka.Prediction {
-    return switch (engine) {
-        .builtin => zreduce.pka.predict(allocator, mdl, config),
-        .propka => zreduce.pka_propka.predict(allocator, mdl, propka_options),
-        .empirical => zreduce.pka_empirical.predict(allocator, mdl, empirical_options),
+fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
+    const config = parsePkaArgs(args) orelse return;
+    if (isDirectory(config.input_path)) return pkaBatchSubcommand(allocator, config);
+    if (config.n_threads != null or config.jsonl_path != null or config.quiet) {
+        std.debug.print("Error: -j/--threads, --jsonl and --quiet apply to a directory input only\n", .{});
+        std.process.exit(1);
+    }
+
+    const total = zreduce.timing.Stopwatch.start();
+    var wall = total;
+    var times = zreduce.timing.StageTimes{};
+    const source = zreduce.pka_run.readInput(allocator, config.input_path) catch |err| {
+        std.debug.print("Error: cannot read input '{s}': {s}\n", .{ config.input_path, @errorName(err) });
+        std.process.exit(1);
     };
+    defer allocator.free(source);
+    wall.lapInto(&times, .read);
+
+    var resolved = resolvePkaOptions(allocator, config);
+    defer resolved.deinit();
+    wall.lapInto(&times, .load);
+
+    var failure = zreduce.pka_run.Failure{};
+    _ = zreduce.pka_run.processSource(allocator, source, config.input_path, config.output_path, &resolved.options, &failure, &times) catch |err| {
+        switch (failure.stage) {
+            .parse => if (zreduce.run.detectFormat(config.input_path) == .mmcif)
+                std.debug.print("Error: failed to parse mmCIF: {s}\n", .{@errorName(err)})
+            else
+                std.debug.print("Error: failed to parse PDB: {s}\n", .{@errorName(err)}),
+            .no_models => std.debug.print("Error: no matching models\n", .{}),
+            .predict => std.debug.print("Error: pKa prediction failed: {s}\n", .{@errorName(err)}),
+            .write => std.debug.print("Error: failed to write pKa report: {s}\n", .{@errorName(err)}),
+            .read => std.debug.print("Error: cannot read input '{s}': {s}\n", .{ config.input_path, @errorName(err) }),
+        }
+        std.process.exit(1);
+    };
+    if (config.show_timing) {
+        zreduce.timing.printStageProfile("PKA", &zreduce.pka_run.stages, times, total.read(), null);
+    }
 }
 
-fn writePkaReport(
-    io: std.Io,
-    buffer: []u8,
-    output_path: ?[]const u8,
-    input_path: []const u8,
-    reports: []const zreduce.writer.protonation_json.ReportModel,
-) !void {
-    if (output_path) |path| {
-        const file = try std.Io.Dir.cwd().createFile(io, path, .{});
-        defer file.close(io);
-        var fw = file.writer(io, buffer);
-        try zreduce.writer.protonation_json.writePredictionReport(&fw.interface, input_path, reports);
-        try fw.interface.flush();
-    } else {
-        const stdout = std.Io.File.stdout();
-        var sw = stdout.writer(io, buffer);
-        try zreduce.writer.protonation_json.writePredictionReport(&sw.interface, input_path, reports);
-        try sw.interface.flush();
+fn pkaBatchSubcommand(allocator: Allocator, config: PkaConfig) void {
+    var load = zreduce.timing.Stopwatch.start();
+    var resolved = resolvePkaOptions(allocator, config);
+    defer resolved.deinit();
+    var n_threads = config.n_threads orelse 0;
+    if (resolved.options.engine == .propka and n_threads != 1) {
+        // zpropka's thread safety is not established; run PROPKA serially.
+        std.debug.print("note: --engine propka runs on 1 thread\n", .{});
+        n_threads = 1;
     }
+    zreduce.pka_batch.run(allocator, .{
+        .input_dir = config.input_path,
+        .output_dir = config.output_path,
+        .jsonl_path = config.jsonl_path,
+        .n_threads = n_threads,
+        .quiet = config.quiet,
+        .show_timing = config.show_timing,
+        .options = resolved.options,
+        .load_ns = load.read(),
+    }) catch |err| {
+        switch (err) {
+            error.SomeFilesFailed, error.NoFilesFound => {},
+            else => std.debug.print("Error: pKa batch failed: {s}\n", .{@errorName(err)}),
+        }
+        std.process.exit(1);
+    };
 }

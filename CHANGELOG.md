@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `evaluate.py` reports error by experimental-shift bin, a fixed reference
+  null model, protonation-state accuracy at pH 7 and how many state flips
+  (sites whose state differs from the reference pKa) are predicted
+- `CITATION.cff` and `THIRD_PARTY_NOTICES.md`
+- `zreduce pka <dir>` batch mode: one `<stem>.json` per structure file,
+  byte-identical to single-file runs, in parallel (`-j N`; PROPKA engine on one
+  thread), with a per-file `--jsonl` log; failed files do not stop the batch
+- `--timing` for `run`, `batch` and `pka`: per-stage timing breakdown (read,
+  parse, chemistry, place, optimize, validate, pKa, write), wall time, and file
+  count/throughput in batch modes, on stderr
+- Generic `ThreadPool` (`src/thread_pool.zig`, adapted from zsasa); `batch`
+  now runs its workers on it
 - `zhyd-empirical-v1.2`: CYS, TYR and HIS parameters refitted on PKAD-R merged
   with the external set (`scripts/pka/merge_sets.py`,
   `calibrate_empirical.py --rows all --nested-folds`), kept by nested
@@ -85,6 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `NtermMode` enum re-exported from `zreduce.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
+- `batch --jsonl` kept only the last few lines: each line was written at file
+  offset 0 and overwrote the previous ones; lines are now appended
 - `_entity` written as key-value pairs (single-entity files) now sets residue
   entity types; such files previously had no polymer residues and no pKa
   sites (#264)

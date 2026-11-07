@@ -1,0 +1,66 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below, together with the original reduce paper and, for pKa results, PROPKA 3."
+type: software
+title: "zreduce"
+abstract: "Zig implementation of reduce-style hydrogen placement for macromolecular structures (mmCIF/PDB), with protonation-state reports and an MIT empirical pKa engine."
+authors:
+  - family-names: "Nagae"
+    given-names: "Tsubasa"
+    orcid: "https://orcid.org/0009-0003-2202-8741"
+license: MIT
+repository-code: "https://github.com/N283T/zreduce"
+url: "https://github.com/N283T/zreduce"
+keywords:
+  - hydrogen-placement
+  - protonation
+  - pka
+  - structural-biology
+  - mmcif
+  - zig
+references:
+  - type: article
+    title: "Asparagine and glutamine: using hydrogen atom contacts in the choice of side-chain amide orientation"
+    authors:
+      - family-names: "Word"
+        given-names: "J. Michael"
+      - name: "et al."
+    journal: "Journal of Molecular Biology"
+    volume: 285
+    start: 1735
+    end: 1747
+    year: 1999
+    doi: "10.1006/jmbi.1998.2401"
+  - type: article
+    title: "PROPKA3: consistent treatment of internal and surface residues in empirical pKa predictions"
+    authors:
+      - family-names: "Olsson"
+        given-names: "Mats H. M."
+      - family-names: "Søndergaard"
+        given-names: "Chresten R."
+      - family-names: "Rostkowski"
+        given-names: "Michal"
+      - family-names: "Jensen"
+        given-names: "Jan H."
+    journal: "Journal of Chemical Theory and Computation"
+    volume: 7
+    start: 525
+    end: 537
+    year: 2011
+    doi: "10.1021/ct100578z"
+  - type: article
+    title: "Improved treatment of ligands and coupling effects in empirical calculation and rationalization of pKa values"
+    authors:
+      - family-names: "Søndergaard"
+        given-names: "Chresten R."
+      - family-names: "Olsson"
+        given-names: "Mats H. M."
+      - family-names: "Rostkowski"
+        given-names: "Michal"
+      - family-names: "Jensen"
+        given-names: "Jan H."
+    journal: "Journal of Chemical Theory and Computation"
+    volume: 7
+    start: 2284
+    end: 2295
+    year: 2011
+    doi: "10.1021/ct200133y"

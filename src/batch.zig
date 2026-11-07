@@ -9,6 +9,8 @@ fn defaultIo() std.Io {
 }
 const zreduce = @import("root.zig");
 const run_mod = zreduce.run;
+const thread_pool = @import("thread_pool.zig");
+const timing = zreduce.timing;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -33,7 +35,12 @@ pub const BatchConfig = struct {
     strip_h: bool = false,
     gzip_output: bool = false,
     model_filter: zreduce.run.ModelFilter = .all,
+    /// Print a per-stage timing breakdown to stderr after the summary.
+    show_timing: bool = false,
 };
+
+/// Stages reported by `zreduce run/batch --timing`, in pipeline order.
+pub const run_stages = [_]timing.Stage{ .load, .read, .parse, .chemistry, .place, .optimize, .validate, .write };
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -56,6 +63,17 @@ pub const BatchResult = struct {
     total_time_ns: u64,
     file_results: []FileResult,
     allocator: Allocator,
+    /// Worker threads used (1 = sequential).
+    threads: u32 = 1,
+
+    /// Stage times summed over the successful files.
+    pub fn stageTimes(self: *const BatchResult) timing.StageTimes {
+        var total = timing.StageTimes{};
+        for (self.file_results) |r| {
+            if (r.result) |res| total.merge(res.timing);
+        }
+        return total;
+    }
 
     pub fn printSummary(self: *const BatchResult) void {
         std.debug.print("\n--- Batch Summary ---\n", .{});
@@ -279,7 +297,7 @@ fn runBatchSequential(
 
 /// Mutex-protected JSONL streaming writer. The file handle is borrowed
 /// from the caller and must outlive this writer.
-const JsonlStreamWriter = struct {
+pub const JsonlStreamWriter = struct {
     mutex: std.Io.Mutex = .init,
     file: std.Io.File,
     write_errors: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
@@ -292,19 +310,19 @@ const JsonlStreamWriter = struct {
             _ = self.write_errors.fetchAdd(1, .monotonic);
             return;
         };
+        self.writeLine(line_buf.writer.buffered());
+    }
 
-        // Write under mutex (unbuffered to avoid stale buffered-writer state)
+    /// Append one pre-serialized line (including its trailing newline).
+    pub fn writeLine(self: *JsonlStreamWriter, line: []const u8) void {
+        // Write under mutex. Streaming (append at the current file offset):
+        // a positional `file.writer` restarts at offset 0 on every call and
+        // would overwrite the previous lines.
         const io = defaultIo();
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
 
-        var file_buf: [4096]u8 = undefined;
-        var file_writer = self.file.writer(io, &file_buf);
-        file_writer.interface.writeAll(line_buf.writer.buffered()) catch {
-            _ = self.write_errors.fetchAdd(1, .monotonic);
-            return;
-        };
-        file_writer.interface.flush() catch {
+        self.file.writeStreamingAll(io, line) catch {
             _ = self.write_errors.fetchAdd(1, .monotonic);
         };
     }
@@ -323,23 +341,18 @@ const ParallelContext = struct {
     sdf_dict: ?*const zreduce.ccd.ComponentDict,
     results: []FileResult,
     result_allocator: Allocator,
-    next_file: std.atomic.Value(usize),
     processed_count: std.atomic.Value(usize),
     jsonl_stream: ?*JsonlStreamWriter,
 };
 
-fn parallelWorker(ctx: *ParallelContext) void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
-    defer arena.deinit();
-
-    while (true) {
-        const file_idx = ctx.next_file.fetchAdd(1, .monotonic);
-        if (file_idx >= ctx.files.len) break;
-
+/// Thread-pool work function: process files [start, end) (one file per chunk).
+fn parallelWorker(ctx: *ParallelContext, start: usize, end: usize) void {
+    for (start..end) |file_idx| {
         const filename = ctx.files[file_idx];
 
-        // Reset arena per file to bound memory usage
-        _ = arena.reset(.retain_capacity);
+        // Per-file arena bounds memory usage; owned strings are copied out.
+        var arena = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+        defer arena.deinit();
         const alloc = arena.allocator();
 
         var result = processFileInBatch(
@@ -383,6 +396,13 @@ fn parallelWorker(ctx: *ParallelContext) void {
     }
 }
 
+/// Resolve the worker count: 0 = all CPUs; never more than CPUs or files.
+pub fn resolveThreadCount(requested: u32, n_files: usize) u32 {
+    const cpu_count: u32 = @intCast(std.Thread.getCpuCount() catch 1);
+    const n_threads = if (requested == 0) cpu_count else @min(requested, cpu_count);
+    return @max(1, @min(n_threads, @as(u32, @intCast(@min(n_files, std.math.maxInt(u32))))));
+}
+
 fn runBatchParallel(
     allocator: Allocator,
     files: []const []const u8,
@@ -393,22 +413,19 @@ fn runBatchParallel(
     config: *const BatchConfig,
     jsonl_stream: ?*JsonlStreamWriter,
 ) !BatchResult {
+    const actual_threads = resolveThreadCount(config.n_threads, files.len);
+
+    // Fall back to sequential for 1 thread or 1 file
+    if (files.len <= 1 or actual_threads <= 1) {
+        var seq = try runBatchSequential(allocator, files, input_dir, output_dir, dict, sdf_dict_param, config, jsonl_stream);
+        seq.threads = 1;
+        return seq;
+    }
+
     const file_results = try allocator.alloc(FileResult, files.len);
     // Zero-initialize so deinit is safe even if a worker panics before writing a slot.
     @memset(file_results, FileResult{ .filename = &.{}, .status = .err });
     errdefer allocator.free(file_results);
-
-    const cpu_count: u32 = @intCast(std.Thread.getCpuCount() catch 1);
-    const n_threads = if (config.n_threads == 0)
-        cpu_count
-    else
-        @min(config.n_threads, cpu_count);
-
-    // Fall back to sequential for 1 thread or 1 file
-    if (files.len <= 1 or n_threads <= 1) {
-        allocator.free(file_results);
-        return runBatchSequential(allocator, files, input_dir, output_dir, dict, sdf_dict_param, config, jsonl_stream);
-    }
 
     var ctx = ParallelContext{
         .files = files,
@@ -419,28 +436,19 @@ fn runBatchParallel(
         .sdf_dict = sdf_dict_param,
         .results = file_results,
         .result_allocator = allocator,
-        .next_file = std.atomic.Value(usize).init(0),
         .processed_count = std.atomic.Value(usize).init(0),
         .jsonl_stream = jsonl_stream,
     };
 
-    const actual_threads: u32 = @min(n_threads, @as(u32, @intCast(files.len)));
-    const threads = try allocator.alloc(std.Thread, actual_threads);
-    defer allocator.free(threads);
-
-    var spawned: u32 = 0;
-    errdefer {
-        // On partial spawn failure, signal remaining workers to stop and join.
-        _ = ctx.next_file.fetchAdd(files.len, .monotonic);
-        for (threads[0..spawned]) |thread| {
-            thread.join();
-        }
-    }
-
-    for (threads) |*thread| {
-        thread.* = try std.Thread.spawn(.{}, parallelWorker, .{&ctx});
-        spawned += 1;
-    }
+    var pool = try thread_pool.ThreadPool(*ParallelContext, void).init(
+        allocator,
+        actual_threads,
+        parallelWorker,
+        &ctx,
+        files.len,
+        1, // one file per chunk: dynamic load balancing across uneven files
+    );
+    defer pool.deinit();
 
     // Spawn a progress reporter thread if not quiet.
     // It polls processed_count periodically and exits when signaled via progress_done.
@@ -465,10 +473,8 @@ fn runBatchParallel(
     else
         null;
 
-    // Join all worker threads.
-    for (threads) |thread| {
-        thread.join();
-    }
+    // Run the workers; returns once every file is processed and joined.
+    pool.run();
 
     // Signal progress thread to stop and join it.
     progress_done.store(true, .release);
@@ -492,10 +498,11 @@ fn runBatchParallel(
         .total_time_ns = total_time_ns,
         .file_results = file_results,
         .allocator = allocator,
+        .threads = actual_threads,
     };
 }
 
-fn writeJsonString(writer: anytype, s: []const u8) !void {
+pub fn writeJsonString(writer: anytype, s: []const u8) !void {
     try writer.writeByte('"');
     for (s) |c| switch (c) {
         '"' => try writer.writeAll("\\\""),
@@ -544,6 +551,7 @@ fn writeJsonlLine(writer: anytype, file_result: FileResult) !void {
 
 pub fn run(allocator: Allocator, config: BatchConfig) !void {
     const io = defaultIo();
+    var wall = timing.Stopwatch.start();
     // 1. Load CCD dictionary (once)
     var ccd_dict: ?zreduce.ccd.ComponentDict = null;
     if (config.dict_path) |dict_path| {
@@ -564,6 +572,7 @@ pub fn run(allocator: Allocator, config: BatchConfig) !void {
         };
     }
     defer if (sdf_dict) |*d| d.deinit();
+    const load_ns = wall.read();
 
     // 2. Scan directory
     const files = try scanDirectory(allocator, config.input_dir);
@@ -637,6 +646,15 @@ pub fn run(allocator: Allocator, config: BatchConfig) !void {
 
     // 7. Print summary
     batch_result.printSummary();
+    if (config.show_timing) {
+        var stages = batch_result.stageTimes();
+        stages.addNs(.load, load_ns);
+        timing.printStageProfile("BATCH", &run_stages, stages, wall.read(), .{
+            .files = batch_result.total_files,
+            .successful = batch_result.successful,
+            .threads = batch_result.threads,
+        });
+    }
 
     // 8. Return error if any files failed
     if (batch_result.failed > 0) {
@@ -746,4 +764,27 @@ test "writeJsonString escapes special characters" {
     try writeJsonString(&buf.writer, "a\"b\\c\nd");
     const output = buf.writer.buffered();
     try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\nd\"", output);
+}
+
+test "runBatchParallel processes every file on the thread pool in order" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const out_dir = try tmp_dir.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(out_dir);
+
+    const files = [_][]const u8{ "tiny.cif", "his.cif", "missing.cif", "asn.cif", "tiny.pdb" };
+    const config = BatchConfig{ .input_dir = "src/test_data", .n_threads = 4, .quiet = true };
+    var result = try runBatchParallel(allocator, &files, "src/test_data", out_dir, null, null, &config, null);
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(u32, files.len), result.total_files);
+    try std.testing.expectEqual(@as(u32, 4), result.successful);
+    try std.testing.expectEqual(@as(u32, 1), result.failed);
+    // Results keep input order regardless of which worker finished first.
+    for (files, result.file_results) |name, r| try std.testing.expectEqualStrings(name, r.filename);
+    try std.testing.expectEqual(FileResult.Status.err, result.file_results[2].status);
+    try std.testing.expect(result.file_results[0].result.?.n_placed > 0);
+    try std.testing.expect(result.stageTimes().get(.read) > 0);
 }

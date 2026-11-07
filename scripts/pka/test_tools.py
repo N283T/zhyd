@@ -51,6 +51,30 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(evaluate.metrics(rows)["mae"], 1.0)
         self.assertEqual(evaluate.metrics(rows)["rmse"], 1.0)
 
+    def test_state_flips_and_shift_strata_use_reference_pka(self):
+        def row(site, experimental, predicted):
+            return {
+                "comp_id": site,
+                "experimental_pka": str(experimental),
+                "predicted_pka": str(predicted),
+                "model_pka": "0",  # engine model pKa must not matter
+                "burial_fraction": "0",
+            }
+
+        rows = [
+            row("HIS", 6.6, 6.0),  # no flip; state right (both deprotonated)
+            row("HIS", 7.5, 7.2),  # flip vs reference 6.5; predicted right
+            row("CYS", 6.0, 8.0),  # flip vs reference 9.0; predicted wrong
+        ]
+        m = evaluate.metrics(rows)
+        self.assertEqual(m["state_flips"], 2)
+        self.assertEqual(m["state_flips_correct"], 1)
+        self.assertAlmostEqual(float(m["state_accuracy"] or 0), 2 / 3)
+        self.assertAlmostEqual(
+            float(m["reference_null_mae"] or 0), (0.1 + 1.0 + 3.0) / 3
+        )
+        self.assertEqual([evaluate.shift_bin(r) for r in rows], ["<0.5", "1-2", ">=2"])
+
     def test_propka_summary_parser(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "x.pka"

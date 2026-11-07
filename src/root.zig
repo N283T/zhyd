@@ -19,6 +19,10 @@ pub const validate = @import("validate.zig");
 pub const gzip = @import("gzip.zig");
 pub const run = @import("run.zig");
 pub const batch = @import("batch.zig");
+pub const thread_pool = @import("thread_pool.zig");
+pub const timing = @import("timing.zig");
+pub const pka_run = @import("pka_run.zig");
+pub const pka_batch = @import("pka_batch.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

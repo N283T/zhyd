@@ -80,6 +80,14 @@ related proteins never cross between train and test. SNase rows get
 burial stratum (per split, never mixed), plus a null model that predicts the
 intrinsic model pKa.
 
+It also stratifies by the size of the experimental shift from a fixed
+reference pKa (`<0.5`, `0.5-1`, `1-2`, `>=2`) and reports the protonation
+state at pH 7: `state_accuracy` over all sites, and `state_flips` /
+`state_flips_correct` for sites whose experimental state differs from the
+reference-pKa state. About two thirds of experimental sites shift by less
+than 1 unit, where the null model is nearly exact; the shifted bins and the
+flips are where a predictor earns its keep.
+
 ## External test set (disjoint from PKAD-R)
 
 PKAD-R train and test have both been looked at during development, so a

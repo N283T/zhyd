@@ -25,6 +25,11 @@ zig build test --summary all        # Run all tests (~490)
 ./zig-out/bin/zreduce batch input_dir/ -o output_dir/
 ./zig-out/bin/zreduce batch input_dir/ -d components.cif --jsonl log.jsonl
 ./zig-out/bin/zreduce batch input_dir/ -j 4  # limit to 4 threads
+./zig-out/bin/zreduce batch input_dir/ --timing  # per-stage timing to stderr
+
+# pKa reports (single file or directory batch)
+./zig-out/bin/zreduce pka input.cif -o pka.json
+./zig-out/bin/zreduce pka input_dir/ -o pka_dir/ -j 8 --jsonl pka.jsonl
 ```
 
 ## Project structure
@@ -34,6 +39,10 @@ src/
   main.zig              CLI entry point (subcommand dispatch: run/batch)
   run.zig               Single-file processing pipeline
   batch.zig             Batch processing (parallel, JSONL log)
+  thread_pool.zig       Generic ThreadPool(Context, Result) (atomic chunk counter)
+  timing.zig            Per-stage timing for --timing
+  pka_run.zig           Per-file pKa pipeline (shared by single-file and batch)
+  pka_batch.zig         `pka <dir>` batch mode (parallel, JSONL log)
   root.zig              Library re-exports
   validate.zig          Post-placement model validation
   math.zig              Vec3, rotation, dihedral
