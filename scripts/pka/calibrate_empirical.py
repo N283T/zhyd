@@ -19,6 +19,7 @@ used.
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import subprocess
@@ -151,6 +152,63 @@ def select(
     return {"variants": summary, "selected": best}
 
 
+def outer_fold(cluster: str, seed: str, folds: int) -> int:
+    digest = hashlib.sha256(f"{seed}\0outer\0{cluster}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") % folds
+
+
+def nested_cv(
+    errors: Mapping[Point, Sequence[float | None]],
+    rows: list[dict],
+    kind: str,
+    models: list[float],
+    scales: list[float],
+    default: Point,
+    folds: int,
+    seed: str,
+) -> dict:
+    """Estimate the whole selection procedure: for each outer cluster fold,
+    run `select` (fit + inner leave-one-cluster-out choice of variant) on the
+    other folds and predict the held-out fold with the chosen point."""
+    out: list[float | None] = [None] * len(rows)
+    chosen = []
+    fold_of = [outer_fold(r["cluster_id"], seed, folds) for r in rows]
+    for fold in range(folds):
+        inner = [i for i, f in enumerate(fold_of) if f != fold]
+        held = [i for i, f in enumerate(fold_of) if f == fold]
+        if not held or not inner:
+            continue
+        sub_errors = {p: [e[i] for i in inner] for p, e in errors.items()}
+        result = select(
+            sub_errors, [rows[i] for i in inner], kind, models, scales, default
+        )
+        best = result["variants"][result["selected"]]
+        point = (best["model_pka"], best["desolvation_scale"])
+        chosen.append(
+            {"fold": fold, "variant": result["selected"], "point": list(point)}
+        )
+        for i in held:
+            out[i] = errors[point][i]
+    every = list(range(len(rows)))
+    kind_rows = [i for i, r in enumerate(rows) if r["site"] == kind]
+    return {
+        "folds": folds,
+        "nested_cv_mae": round(mae(out, every), 4),
+        "nested_cv_mae_kind": round(mae(out, kind_rows), 4),
+        "default_mae": round(mae(errors[default], every), 4),
+        "default_mae_kind": round(mae(errors[default], kind_rows), 4),
+        "chosen": chosen,
+    }
+
+
+def fitting_rows(path: Path, rows: str, seed: str, train_fraction: float) -> list[dict]:
+    """`train`: the cluster train split; `all`: every non-holdout row."""
+    if rows == "train":
+        return calibrate.train_rows(path, seed, train_fraction)
+    with path.open(newline="") as handle:
+        return [r for r in csv.DictReader(handle) if not r["holdout_family"]]
+
+
 def contains_residue(cif: Path, name: str) -> bool:
     return f" {name} " in cif.read_text()
 
@@ -231,6 +289,18 @@ def main() -> None:
     parser.add_argument("--seed", default="zhyd-pka-split-v1")
     parser.add_argument("--train-fraction", type=float, default=0.8)
     parser.add_argument(
+        "--rows",
+        choices=["train", "all"],
+        default="train",
+        help="fit on the train split, or on every non-holdout row (merged sets)",
+    )
+    parser.add_argument(
+        "--nested-folds",
+        type=int,
+        default=0,
+        help="also estimate the procedure by nested cluster CV with this many folds",
+    )
+    parser.add_argument(
         "--model-range", type=float, default=1.5, help="± around the default"
     )
     parser.add_argument("--model-step", type=float, default=0.1)
@@ -247,7 +317,7 @@ def main() -> None:
     parser.add_argument("-o", "--output", type=Path, required=True)
     args = parser.parse_args()
 
-    rows = calibrate.train_rows(args.canonical_csv, args.seed, args.train_fraction)
+    rows = fitting_rows(args.canonical_csv, args.rows, args.seed, args.train_fraction)
     fixed = json.loads(args.fixed.read_text()) if args.fixed else {}
     default = (DEFAULT_MODEL_PKA[args.kind], 1.0)
     models = grid(
@@ -281,19 +351,35 @@ def main() -> None:
     errors = {p: abs_errors(v, rows) for p, v in table.items()}
     result = select(errors, rows, args.kind, models, scales, default)
     chosen = result["variants"][result["selected"]]
+    nested = (
+        nested_cv(
+            errors,
+            rows,
+            args.kind,
+            models,
+            scales,
+            default,
+            args.nested_folds,
+            args.seed,
+        )
+        if args.nested_folds
+        else None
+    )
     record = {
         "kind": args.kind,
         "selected": result["selected"],
         "model_pka": chosen["model_pka"],
         "desolvation_scale": chosen["desolvation_scale"],
         "variants": result["variants"],
+        "nested_cv": nested,
         "fit": {
-            "objective": "train_split_mae",
-            "selection": "lowest leave-one-cluster-out CV MAE over the train split",
+            "objective": f"{args.rows}_rows_mae",
+            "rows": args.rows,
+            "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
             "seed": args.seed,
             "train_fraction": args.train_fraction,
-            "train_rows": len(rows),
-            "train_clusters": len({r["cluster_id"] for r in rows}),
+            "fitting_rows": len(rows),
+            "fitting_clusters": len({r["cluster_id"] for r in rows}),
             "kind_rows": sum(r["site"] == args.kind for r in rows),
             "grid": {
                 "model_pka": [models[0], models[-1], args.model_step],

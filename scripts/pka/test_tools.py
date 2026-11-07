@@ -8,6 +8,7 @@ import compare_engines
 import compare_propka
 import evaluate
 import external_set
+import merge_sets
 import pkadr
 
 
@@ -254,6 +255,64 @@ class PkadrTests(unittest.TestCase):
         self.assertEqual(
             argv[-4:], ["--engine", "empirical", "--empirical-mode", "zhyd"]
         )
+
+    def test_nested_cv_reports_held_out_fold_errors(self):
+        rows = [
+            {"site": "CYS", "cluster_id": c, "experimental_pka": "8.0"}
+            for c in "abcdefghijklmnopqrst"
+        ]
+        default = (9.0, 1.0)
+        table = {
+            (9.0, 1.0): [9.0] * 20,
+            (8.0, 1.0): [8.0] * 20,
+        }
+        errors = {p: calibrate_empirical.abs_errors(v, rows) for p, v in table.items()}
+        nested = calibrate_empirical.nested_cv(
+            errors, rows, "CYS", [8.0, 9.0], [1.0], default, 2, "seed"
+        )
+        self.assertEqual(nested["default_mae"], 1.0)
+        self.assertEqual(nested["nested_cv_mae"], 0.0)
+        self.assertTrue(all(c["point"] == [8.0, 1.0] for c in nested["chosen"]))
+
+    def test_merge_joins_clusters_through_shared_sequence_clusters(self):
+        base = {
+            "chain": "A",
+            "auth_seq_id": "1",
+            "site": "ASP",
+            "experimental_pka": "3",
+        }
+        a = [
+            {
+                **base,
+                "entry_id": "1",
+                "pdb_id": "1AAA",
+                "cluster_id": "x",
+                "holdout_family": "",
+            },
+            {
+                **base,
+                "entry_id": "2",
+                "pdb_id": "1SNA",
+                "cluster_id": "s",
+                "holdout_family": "snase",
+            },
+        ]
+        b = [
+            {
+                **base,
+                "entry_id": "1",
+                "pdb_id": "2BBB",
+                "cluster_id": "y",
+                "holdout_family": "external",
+            }
+        ]
+        clusters = {"1AAA": {3}, "2BBB": {3, 4}, "1SNA": {9}}
+        rows, summary = merge_sets.merge([("r", a), ("e", b)], clusters, {"snase"})
+        self.assertEqual([r["entry_id"] for r in rows], ["r:1", "r:2", "e:1"])
+        self.assertEqual(rows[0]["cluster_id"], rows[2]["cluster_id"])
+        self.assertNotEqual(rows[0]["cluster_id"], rows[1]["cluster_id"])
+        self.assertEqual([r["holdout_family"] for r in rows], ["", "snase", ""])
+        self.assertEqual(summary["fitting_rows"], 2)
 
     def test_empirical_calibration_selects_by_cluster_cv(self):
         # Two CYS rows in clusters a and b and one ASP row in cluster c.

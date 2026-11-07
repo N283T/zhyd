@@ -154,8 +154,9 @@ experimental MIT reimplementation of the PROPKA 3 protein model, written from
 every build; on protein-only PKAD-R structures 99.84 % of its sites are
 within 0.02 of PROPKA (ligand and nucleic-acid groups are not modelled yet).
 By default it runs in zhyd mode: corrections of PROPKA's model quirks
-and a CYS/TYR recalibration (`zhyd-empirical-v1.1`, experimental and
-unvalidated; PKAD-R test MAE 0.71 against 1.17 for PROPKA);
+and a CYS/TYR/HIS recalibration (`zhyd-empirical-v1.2`, experimental and
+unvalidated; on a PKAD-R-disjoint external set v1.1 had MAE 1.10 against
+1.32 for PROPKA and 1.21 for the null model);
 `--empirical-mode parity` reproduces the PROPKA 3 model instead;
 `--empirical-fixes` selects corrections one by one and `--parameters`
 overrides per-site model pKa and desolvation scale in zhyd mode.

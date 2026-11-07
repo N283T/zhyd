@@ -1,10 +1,11 @@
 # zhyd empirical pKa engine — specification
 
-Status: draft r5 (2026-11-07); parity mode implemented and accepted with
+Status: draft r6 (2026-11-07); parity mode implemented and accepted with
 documented deviations (see [Parity status](#parity-status-r2)); zhyd mode
 corrections Q1–Q8 implemented, measured and adopted (see
 [zhyd mode ablation](#zhyd-mode-ablation-r3)); recalibrated table
-`zhyd-empirical-v1.1` (see [Recalibration](#recalibration-r4)). Target: an
+`zhyd-empirical-v1.2` (see [Recalibration on merged data](#recalibration-on-merged-data-r6);
+v1.1 in [Recalibration](#recalibration-r4)). Target: an
 MIT-licensed protein pKa engine in
 zreduce that first reproduces the PROPKA 3 empirical model ("parity mode") and
 then improves on it ("zhyd mode").
@@ -728,8 +729,8 @@ pair terms.
   correction is on, `zhyd-empirical-v1` for the adopted set (Q1–Q8),
   otherwise `zhyd-empirical-v1` followed by `+Qn` for every enabled
   correction (e.g. `zhyd-empirical-v1+Q2+Q7`). On the recalibrated table,
-  `zhyd-empirical-v1.1` for the adopted set, otherwise
-  `zhyd-empirical-v1.1+Qn…` (`zhyd-empirical-v1.1+none` without
+  `zhyd-empirical-v1.2` (r6; v1.1 before) for the adopted set, otherwise
+  `zhyd-empirical-v1.2+Qn…` (`zhyd-empirical-v1.2+none` without
   corrections). A parameter override file reports its own version. Engine
   name `zhyd-empirical (parity)` with report status
   `experimental_parity_with_propka3_model` only for the unmodified parity
@@ -832,6 +833,42 @@ set, which is CYS-heavy (20 of 116 sites) and harder than PKAD-R (null MAE
 1.21 vs 0.88 on the PKAD-R test split). The HIS advantage of pKAI+ seen on
 PKAD-R does not reproduce here.
 
+### Recalibration on merged data (r6)
+
+After the external test (r5) was read once, it was merged into the fitting
+data, so the larger CYS sample could be used. `scripts/pka/merge_sets.py`
+joins PKAD-R and the external set and re-derives clusters as the union of
+PKAD-R clusters, PDB entries and RCSB 30 % sequence clusters: 932 fitting
+rows (all non-SNase rows) in 123 clusters; CYS 82, TYR 26, HIS 198. SNase
+stays a stress set. `calibrate_empirical.py --rows all --nested-folds 5`
+fits each kind on all fitting rows (desolvation scale grid widened to
+0.0–1.5) and estimates the whole procedure (fit + inner leave-one-cluster-out
+variant choice) by 5-fold nested cluster CV. Kinds were fitted in order CYS,
+TYR, HIS, each on top of the earlier ones; a kind is kept only if its nested
+CV MAE beats the default.
+
+| Kind | Default → v1.2 (model pKa, scale) | Kind MAE default / v1.1 / v1.2 (fit) | Kind nested CV MAE | All-rows nested CV MAE (default) |
+|---|---|---|---|---|
+| CYS | 9.0, 1.0 → **7.5, 0.45** | 3.56 / 1.95 / 1.78 | 1.92 | 0.790 (0.892) |
+| TYR | 10.0, 1.0 → **10.0, 0.0** | 1.99 / 1.26 / 1.04 | 1.36 | 0.790 (0.801) |
+| HIS | 6.5, 1.0 → **6.8, 0.75** | 0.92 / 0.92 / 0.80 | 0.85 | 0.770 (0.781) |
+
+Every outer fold chose the same CYS point within one grid step. Notes:
+
+- The CYS model pKa sits on the lower grid bound (default − 1.5); it was
+  not widened further, because it already compensates for an overestimated
+  buried-thiol shift rather than describing the free thiol.
+- TYR keeps its model pKa and loses its desolvation term entirely.
+- With v1.2, MAE over the fitting rows is 0.759 (v1.1 table 0.791, parity
+  table 0.892); PKAD-R rows 0.714 (null 0.756), external rows 1.052 (null
+  1.234). These are in-sample numbers; the nested CV column is the estimate.
+- SNase (stress, not fitted) moves from 0.924 to 0.981 (null 2.006), mostly
+  through the HIS change.
+- There is no independent test any more. The next one should be new
+  literature values outside PKAD-R and PKAD-3 (time split).
+
+Fit record: `scripts/pka/params/zhyd-empirical-v1.2.json`.
+
 ## Revision log
 
 | Rev | Date | Change |
@@ -842,3 +879,4 @@ PKAD-R does not reproduce here.
 | r3 | 2026-11-07 | zhyd mode: Q8 (insertion-code artefacts) added; precise rules for Q1–Q8; Q6 recorded as a no-op of the parity input; evaluation protocol and ablation on PKAD-R; adopted set Q1, Q3, Q5–Q8 (Q2, Q4 not adopted); version and engine naming of correction sets |
 | r4 | 2026-11-07 | Protocol amendment (adopt physically motivated corrections with train-MAE effect within ±0.002); Q2 and Q4 adopted, zhyd v1 = Q1–Q8; per-kind model pKa and desolvation scale parameters with zhyd-mode override files; recalibrated table `zhyd-empirical-v1.1` (CYS and TYR, train split, leave-one-cluster-out CV); new version scheme |
 | r5 | 2026-11-07 | External test set disjoint from PKAD-R (30 % sequence clusters) and its results |
+| r6 | 2026-11-07 | Recalibration on PKAD-R merged with the external set (nested cluster CV): `zhyd-empirical-v1.2` with CYS, TYR and HIS parameters |

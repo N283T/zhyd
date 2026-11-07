@@ -188,7 +188,7 @@ test "zhyd mode names its engine and correction set" {
     const cases = [_]Case{
         .{ .options = .{}, .engine = parity_engine_name, .version = params.parity_version },
         .{ .options = .{ .mode = .zhyd }, .engine = zhyd_engine_name, .version = params.zhyd_version },
-        .{ .options = .{ .mode = .zhyd, .fixes = .none }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1.1+none" },
+        .{ .options = .{ .mode = .zhyd, .fixes = .none }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1.2+none" },
         .{ .options = .{ .fixes = zhyd_fixes }, .engine = zhyd_engine_name, .version = params.zhyd_v1_version },
         .{ .options = .{ .fixes = .{ .q2 = true, .q7 = true } }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1+Q2+Q7" },
         .{ .options = .{ .mode = .zhyd, .overrides = .{ .version = "my-fit" } }, .engine = zhyd_engine_name, .version = "my-fit" },

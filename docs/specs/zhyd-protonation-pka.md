@@ -2,7 +2,7 @@
 
 Status: three pKa engines. PROPKA 3.5.1 via the optional zpropka port
 (reference method, reproduces `propka3`), the experimental MIT empirical
-engine (zhyd mode `zhyd-empirical-v1.1`, the default engine without
+engine (zhyd mode `zhyd-empirical-v1.2`, the default engine without
 PROPKA; parity mode `zhyd-empirical-v1-parity`), and the earlier experimental
 built-in model (`zhyd-pka-protein-v0.2`, fitted, not accepted for
 production). Schema v1.

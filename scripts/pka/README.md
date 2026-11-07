@@ -58,6 +58,18 @@ are kept. `--cache` stores the per-row predictions of every grid point, so
 re-running the selection costs nothing; `--fixed` holds kinds already
 fitted. The record of the v1.1 fit is `params/zhyd-empirical-v1.1.json`.
 
+`--rows all` fits on every non-holdout row of a merged set built by
+`merge_sets.py` (clusters joined through RCSB 30 % sequence clusters), and
+`--nested-folds K` estimates the whole procedure by nested cluster CV. The
+v1.2 fit (PKAD-R + external set) is `params/zhyd-empirical-v1.2.json`:
+
+```sh
+python3 scripts/pka/merge_sets.py pkadr=canonical.csv external=external.csv \
+    --clusters clusters-by-entity-30.txt -o merged.csv
+python3 scripts/pka/calibrate_empirical.py merged.csv --structures all_structures/ \
+    --kind CYS --rows all --nested-folds 5 --scale-min 0.0 -o cys.json
+```
+
 `normalize` keeps numeric, PDB-mapped entries for supported sites and records
 what it excluded. `cluster_id` joins PDB ids linked by PKAD-R's
 `Sequence_Identity_>_30%` and `Alternative_PDBs` columns or by protein name, so
