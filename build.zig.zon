@@ -1,7 +1,7 @@
 .{
-    .name = .zreduce,
+    .name = .zhyd,
     .version = "0.1.0",
-    .fingerprint = 0x573a63b09b575ec7,
+    .fingerprint = 0xd720628249d2d7d5,
     .minimum_zig_version = "0.16.0",
     .paths = .{ "build.zig", "build.zig.zon", "src" },
     .dependencies = .{

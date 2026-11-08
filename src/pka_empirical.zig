@@ -51,7 +51,7 @@ pub const Options = struct {
     mode: Mode = .parity,
     /// Overrides the mode's correction set (ablation).
     fixes: ?Fixes = null,
-    /// zreduce N-terminal policy; under `aggressive` chain breaks create
+    /// zhyd N-terminal policy; under `aggressive` chain breaks create
     /// termini for Q3 and Q4.
     nterm_mode: NtermMode = .auto,
     /// Per-kind model pKa / desolvation scale overrides (`--parameters`,

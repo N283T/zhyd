@@ -10,16 +10,16 @@
 
 Unlike name-based matching, this pairs each H in file A to its nearest H
 in the same residue of file B. This avoids CCD naming convention mismatches
-(e.g. zreduce H67 vs ChimeraX H3A in chlorophyll).
+(e.g. zhyd H67 vs ChimeraX H3A in chlorophyll).
 
 For standard residues with consistent naming, results should be identical
 to name-based matching. For CCD-derived residues, this gives a more
 accurate picture of actual placement quality.
 
 Usage:
-    ./scripts/chimerax_compare_h.py zreduce.cif chimerax.cif
-    ./scripts/chimerax_compare_h.py zreduce.cif chimerax.cif --verbose
-    ./scripts/chimerax_compare_h.py zreduce.cif chimerax.cif --summary-only
+    ./scripts/chimerax_compare_h.py zhyd.cif chimerax.cif
+    ./scripts/chimerax_compare_h.py zhyd.cif chimerax.cif --verbose
+    ./scripts/chimerax_compare_h.py zhyd.cif chimerax.cif --summary-only
 """
 
 import argparse
@@ -324,7 +324,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Compare H placement (coordinate-based)"
     )
-    parser.add_argument("file_a", help="First mmCIF (e.g. zreduce)")
+    parser.add_argument("file_a", help="First mmCIF (e.g. zhyd)")
     parser.add_argument("file_b", help="Second mmCIF (e.g. ChimeraX)")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--summary-only", "-s", action="store_true")

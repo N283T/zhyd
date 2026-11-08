@@ -1,7 +1,7 @@
 //! Internal hydrogens of the empirical pKa engine ("Internal hydrogens").
 //!
 //! These hydrogens exist only for the energy terms; they are never written
-//! out and do not depend on zreduce's hydrogen placement.
+//! out and do not depend on zhyd's hydrogen placement.
 
 const std = @import("std");
 const math = @import("../math.zig");

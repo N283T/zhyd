@@ -1,17 +1,17 @@
-//! `zreduce pka <dir>`: pKa reports for every structure file in a directory.
+//! `zhyd pka <dir>`: pKa reports for every structure file in a directory.
 //!
 //! Each `<dir>/<name>` gets `<outdir>/<stem>.json`, byte-identical to
-//! `zreduce pka <dir>/<name> -o <outdir>/<stem>.json` with the same options
+//! `zhyd pka <dir>/<name> -o <outdir>/<stem>.json` with the same options
 //! (the report echoes the input path as `<dir>/<name>`). Files are processed
 //! in parallel; one failing file does not stop the batch.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const zreduce = @import("root.zig");
-const batch = zreduce.batch;
-const pka_run = zreduce.pka_run;
+const zhyd = @import("root.zig");
+const batch = zhyd.batch;
+const pka_run = zhyd.pka_run;
 const thread_pool = @import("thread_pool.zig");
-const timing = zreduce.timing;
+const timing = zhyd.timing;
 
 fn defaultIo() std.Io {
     return std.Io.Threaded.global_single_threaded.io();

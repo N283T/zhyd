@@ -1,15 +1,15 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below, together with the original reduce paper and, for pKa results, PROPKA 3."
 type: software
-title: "zreduce"
+title: "zhyd"
 abstract: "Zig implementation of reduce-style hydrogen placement for macromolecular structures (mmCIF/PDB), with protonation-state reports and an MIT empirical pKa engine."
 authors:
   - family-names: "Nagae"
     given-names: "Tsubasa"
     orcid: "https://orcid.org/0009-0003-2202-8741"
 license: MIT
-repository-code: "https://github.com/N283T/zreduce"
-url: "https://github.com/N283T/zreduce"
+repository-code: "https://github.com/N283T/zhyd"
+url: "https://github.com/N283T/zhyd"
 keywords:
   - hydrogen-placement
   - protonation

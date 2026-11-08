@@ -23,11 +23,11 @@ pub const Fixes = packed struct(u8) {
     q2: bool = false,
     /// The chain-last amino-acid residue is a C-terminus without OXT.
     q3: bool = false,
-    /// N-termini follow zreduce chains and chain-break detection.
+    /// N-termini follow zhyd chains and chain-break detection.
     q4: bool = false,
     /// Monatomic metal ions by element.
     q5: bool = false,
-    /// Waters removed by zreduce's classification (already part of the
+    /// Waters removed by zhyd's classification (already part of the
     /// parity input, so no further effect).
     q6: bool = false,
     /// Conformation mean over the conformations where the site titrates.
@@ -168,7 +168,7 @@ pub const KindOverrides = struct {
     }
 };
 
-/// Parameter override file for zhyd mode (`zreduce pka --parameters`):
+/// Parameter override file for zhyd mode (`zhyd pka --parameters`):
 /// a required version label plus per-kind model pKa values and desolvation
 /// scale factors. Unknown keys are rejected.
 pub const Overrides = struct {
@@ -258,7 +258,7 @@ pub const Parameters = struct {
     version: []const u8 = parity_version,
     /// zhyd-mode corrections; none in parity mode.
     fixes: Fixes = .{},
-    /// Residues after a chain break are termini (zreduce `--nterm
+    /// Residues after a chain break are termini (zhyd `--nterm
     /// aggressive`); used by Q3 and Q4 only.
     break_termini: bool = false,
 

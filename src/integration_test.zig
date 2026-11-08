@@ -1,4 +1,4 @@
-//! End-to-end integration tests for the full zreduce pipeline.
+//! End-to-end integration tests for the full zhyd pipeline.
 //!
 //! These tests verify the complete flow: parse → place H → write → re-parse.
 

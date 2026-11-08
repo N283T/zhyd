@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert a PROPKA summary and zreduce pKa JSON to residue-level comparison CSV."""
+"""Convert a PROPKA summary and zhyd pKa JSON to residue-level comparison CSV."""
 
 from __future__ import annotations
 
@@ -35,9 +35,7 @@ def parse_propka(path: Path) -> dict[tuple[str, int, str], float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--zhyd", required=True, type=Path, help="zreduce pka JSON report"
-    )
+    parser.add_argument("--zhyd", required=True, type=Path, help="zhyd pka JSON report")
     parser.add_argument("--propka", required=True, type=Path, help="PROPKA .pka output")
     parser.add_argument("-o", "--output", type=Path)
     args = parser.parse_args()

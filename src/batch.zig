@@ -7,10 +7,10 @@ const Allocator = std.mem.Allocator;
 fn defaultIo() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
 }
-const zreduce = @import("root.zig");
-const run_mod = zreduce.run;
+const zhyd = @import("root.zig");
+const run_mod = zhyd.run;
 const thread_pool = @import("thread_pool.zig");
-const timing = zreduce.timing;
+const timing = zhyd.timing;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -27,19 +27,19 @@ pub const BatchConfig = struct {
     no_flip: bool = false,
     quiet: bool = false,
     json_version: []const u8 = "", // passed from main
-    water: zreduce.place.WaterConfig = .{},
-    bond_policy: zreduce.place.BondPolicy = .{},
-    nterm_mode: zreduce.place.NtermMode = .auto,
+    water: zhyd.place.WaterConfig = .{},
+    bond_policy: zhyd.place.BondPolicy = .{},
+    nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
     fix_path: ?[]const u8 = null,
     strip_h: bool = false,
     gzip_output: bool = false,
-    model_filter: zreduce.run.ModelFilter = .all,
+    model_filter: zhyd.run.ModelFilter = .all,
     /// Print a per-stage timing breakdown to stderr after the summary.
     show_timing: bool = false,
 };
 
-/// Stages reported by `zreduce run/batch --timing`, in pipeline order.
+/// Stages reported by `zhyd run/batch --timing`, in pipeline order.
 pub const run_stages = [_]timing.Stage{ .load, .read, .parse, .chemistry, .place, .optimize, .validate, .write };
 
 // ---------------------------------------------------------------------------
@@ -156,8 +156,8 @@ fn processFileInBatch(
     filename: []const u8,
     input_dir: []const u8,
     output_dir: []const u8,
-    dict: ?*const zreduce.ccd.ComponentDict,
-    sdf_dict_param: ?*const zreduce.ccd.ComponentDict,
+    dict: ?*const zhyd.ccd.ComponentDict,
+    sdf_dict_param: ?*const zhyd.ccd.ComponentDict,
     config: *const BatchConfig,
 ) !FileResult {
     const input_path = try std.fs.path.join(allocator, &.{ input_dir, filename });
@@ -224,8 +224,8 @@ fn runBatchSequential(
     files: []const []const u8,
     input_dir: []const u8,
     output_dir: []const u8,
-    dict: ?*const zreduce.ccd.ComponentDict,
-    sdf_dict_param: ?*const zreduce.ccd.ComponentDict,
+    dict: ?*const zhyd.ccd.ComponentDict,
+    sdf_dict_param: ?*const zhyd.ccd.ComponentDict,
     config: *const BatchConfig,
     jsonl_stream: ?*JsonlStreamWriter,
 ) !BatchResult {
@@ -337,8 +337,8 @@ const ParallelContext = struct {
     input_dir: []const u8,
     output_dir: []const u8,
     config: *const BatchConfig,
-    dict: ?*const zreduce.ccd.ComponentDict,
-    sdf_dict: ?*const zreduce.ccd.ComponentDict,
+    dict: ?*const zhyd.ccd.ComponentDict,
+    sdf_dict: ?*const zhyd.ccd.ComponentDict,
     results: []FileResult,
     result_allocator: Allocator,
     processed_count: std.atomic.Value(usize),
@@ -408,8 +408,8 @@ fn runBatchParallel(
     files: []const []const u8,
     input_dir: []const u8,
     output_dir: []const u8,
-    dict: ?*const zreduce.ccd.ComponentDict,
-    sdf_dict_param: ?*const zreduce.ccd.ComponentDict,
+    dict: ?*const zhyd.ccd.ComponentDict,
+    sdf_dict_param: ?*const zhyd.ccd.ComponentDict,
     config: *const BatchConfig,
     jsonl_stream: ?*JsonlStreamWriter,
 ) !BatchResult {
@@ -553,20 +553,20 @@ pub fn run(allocator: Allocator, config: BatchConfig) !void {
     const io = defaultIo();
     var wall = timing.Stopwatch.start();
     // 1. Load CCD dictionary (once)
-    var ccd_dict: ?zreduce.ccd.ComponentDict = null;
+    var ccd_dict: ?zhyd.ccd.ComponentDict = null;
     if (config.dict_path) |dict_path| {
         const dict_source = try run_mod.readFile(allocator, dict_path);
         defer allocator.free(dict_source);
-        ccd_dict = try zreduce.ccd_binary.loadDict(allocator, dict_source);
+        ccd_dict = try zhyd.ccd_binary.loadDict(allocator, dict_source);
     }
     defer if (ccd_dict) |*d| d.deinit();
 
     // 1b. Load SDF topology dictionary (once, optional)
-    var sdf_dict: ?zreduce.ccd.ComponentDict = null;
+    var sdf_dict: ?zhyd.ccd.ComponentDict = null;
     if (config.sdf_path) |sdf_path| {
         const sdf_source = try run_mod.readFile(allocator, sdf_path);
         defer allocator.free(sdf_source);
-        sdf_dict = zreduce.sdf.parseSdf(allocator, sdf_source) catch |err| {
+        sdf_dict = zhyd.sdf.parseSdf(allocator, sdf_source) catch |err| {
             std.debug.print("Error: failed to parse SDF file '{s}': {s}\n", .{ sdf_path, @errorName(err) });
             return err;
         };

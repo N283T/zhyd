@@ -1,8 +1,8 @@
-# zreduce
+# zhyd
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-zreduce is a Zig implementation of the [reduce](https://github.com/rlabduke/reduce)
+zhyd is a Zig implementation of the [reduce](https://github.com/rlabduke/reduce)
 hydrogen placement tool for macromolecular structures. It reads mmCIF/PDB files,
 adds hydrogens, optimizes supported rotatable/flippable groups, and writes mmCIF
 or PDB output.
@@ -21,11 +21,11 @@ zig build -Doptimize=ReleaseFast
 zig build test --summary all
 ```
 
-The optimized executable is written to `zig-out/bin/zreduce`.
+The optimized executable is written to `zig-out/bin/zhyd`.
 
 ### Optional PROPKA engine
 
-`zreduce pka` can use PROPKA 3.5.1 through
+`zhyd pka` can use PROPKA 3.5.1 through
 [zpropka](https://github.com/N283T/zpropka), a Zig port that reproduces
 PROPKA's output. zpropka is LGPL-2.1, so it is not part of the default
 (MIT-only) build. Check it out next to this repository and enable it:
@@ -39,56 +39,56 @@ zig build -Dpropka=true -Doptimize=ReleaseFast
 
 ```bash
 # Single structure
-zreduce run input.cif -o output.cif
-zreduce run input.pdb -o output.pdb
+zhyd run input.cif -o output.cif
+zhyd run input.pdb -o output.pdb
 
 # Compressed input and output
-zreduce run input.cif.gz -o output.cif
-zreduce batch input_dir/ -o output_dir/ --gz
+zhyd run input.cif.gz -o output.cif
+zhyd batch input_dir/ -o output_dir/ --gz
 
 # Use a CCD dictionary and optional ligand topology
-zreduce run input.cif -d components.cif -o output.cif
-zreduce run input.cif -d components.cif --sdf ligand.sdf -o output.cif
+zhyd run input.cif -d components.cif -o output.cif
+zhyd run input.cif -d components.cif --sdf ligand.sdf -o output.cif
 
 # Placement controls
-zreduce run input.cif -o output.cif --no-opt
-zreduce run input.cif -o output.cif --no-flip
-zreduce run input.cif -o output.cif --water
-zreduce run input.cif -o output.cif --strip-h
+zhyd run input.cif -o output.cif --no-opt
+zhyd run input.cif -o output.cif --no-flip
+zhyd run input.cif -o output.cif --water
+zhyd run input.cif -o output.cif --strip-h
 
 # Diagnostics and control files
-zreduce run input.cif -o output.cif --validate
-zreduce run input.cif -o output.cif --json log.json
-zreduce run input.cif -o output.cif --state-json protonation-state.json
-zreduce run input.cif -o output.cif --protonation protonation.txt
-zreduce run input.cif --dump-movers movers.txt --no-opt
-zreduce run input.cif -o output.cif --fix fix.txt
+zhyd run input.cif -o output.cif --validate
+zhyd run input.cif -o output.cif --json log.json
+zhyd run input.cif -o output.cif --state-json protonation-state.json
+zhyd run input.cif -o output.cif --protonation protonation.txt
+zhyd run input.cif --dump-movers movers.txt --no-opt
+zhyd run input.cif -o output.cif --fix fix.txt
 
 # Batch processing
-zreduce batch input_dir/ -o output_dir/
-zreduce batch input_dir/ -d components.cif --jsonl log.jsonl
-zreduce batch input_dir/ -j 4
-zreduce batch input_dir/ -o output_dir/ --timing   # per-stage timing to stderr
+zhyd batch input_dir/ -o output_dir/
+zhyd batch input_dir/ -d components.cif --jsonl log.jsonl
+zhyd batch input_dir/ -j 4
+zhyd batch input_dir/ -o output_dir/ --timing   # per-stage timing to stderr
 
 # Precompile a CCD dictionary
-zreduce compile-dict components.cif -o components.zccd
+zhyd compile-dict components.cif -o components.zccd
 
 # Experimental pKa report (does not change coordinates)
-zreduce pka input.cif -o pka.json
-zreduce pka input.cif --model-only -o model-pka-baseline.json
-zreduce pka input_dir/ -o pka_dir/ -j 8 --jsonl pka.jsonl   # one <stem>.json per file
+zhyd pka input.cif -o pka.json
+zhyd pka input.cif --model-only -o model-pka-baseline.json
+zhyd pka input_dir/ -o pka_dir/ -j 8 --jsonl pka.jsonl   # one <stem>.json per file
 ```
 
 ## Commands
 
 ```text
-zreduce run [OPTIONS] <input.cif|input.pdb>
-zreduce batch [OPTIONS] <input_dir>
-zreduce pka [OPTIONS] <input.cif|input.pdb|input_dir>
-zreduce compile-dict [OPTIONS] <input.cif>
+zhyd run [OPTIONS] <input.cif|input.pdb>
+zhyd batch [OPTIONS] <input_dir>
+zhyd pka [OPTIONS] <input.cif|input.pdb|input_dir>
+zhyd compile-dict [OPTIONS] <input.cif>
 ```
 
-Use `zreduce <command> --help` for the full option list.
+Use `zhyd <command> --help` for the full option list.
 
 Common `run` and `batch` options:
 
@@ -123,9 +123,9 @@ Batch-only options:
 exceed the wall time with several threads) and adds the file count and
 throughput. Machine-readable `<CMD>_<STAGE>_TIME_MS:` lines follow the table.
 
-Given a directory, `zreduce pka` writes `<output_dir>/<stem>.json` (default
+Given a directory, `zhyd pka` writes `<output_dir>/<stem>.json` (default
 `<input_dir>_pka/`) for every `.cif`, `.pdb` or `.ent` file, optionally
-gzipped. Each report is byte-identical to `zreduce pka <input_dir>/<file> -o
+gzipped. Each report is byte-identical to `zhyd pka <input_dir>/<file> -o
 <output_dir>/<stem>.json` with the same options. Parameter files are loaded
 once and files run in parallel (`-j N`; `--engine propka` always runs on one
 thread). `--jsonl PATH` logs one line per file (`input`, `output`, `status`,
@@ -216,16 +216,16 @@ style, and run `zig fmt .` plus `zig build test` before submitting a PR.
 
 ## License
 
-zreduce is released under the MIT License. See [LICENSE](LICENSE) for details.
+zhyd is released under the MIT License. See [LICENSE](LICENSE) for details.
 
 ### Attribution
 
-zreduce is an independent from-scratch Zig reimplementation. No source code from
+zhyd is an independent from-scratch Zig reimplementation. No source code from
 the original [reduce](https://github.com/rlabduke/reduce) tool is used, but the
 hydrogen placement algorithm, scoring heuristics, and bond topology tables it
 pioneered are owed to J. Michael Word, Duke University / UCSF, and contributors.
 
-Please cite the original work if you use zreduce in research:
+Please cite the original work if you use zhyd in research:
 
 > Word, et al. (1999) "Asparagine and glutamine: using hydrogen atom contacts in
 > the choice of side-chain amide orientation." J. Mol. Biol. 285, 1735-1747.

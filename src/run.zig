@@ -6,15 +6,15 @@ const Allocator = std.mem.Allocator;
 fn defaultIo() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
 }
-const zreduce = @import("root.zig");
-const StageTimes = zreduce.timing.StageTimes;
-const Stopwatch = zreduce.timing.Stopwatch;
+const zhyd = @import("root.zig");
+const StageTimes = zhyd.timing.StageTimes;
+const Stopwatch = zhyd.timing.Stopwatch;
 
 pub const ProcessConfig = struct {
     input_path: []const u8,
     output_path: ?[]const u8 = null, // must be non-null when called from batch workers (stdout is not thread-safe)
-    dict: ?*const zreduce.ccd.ComponentDict = null, // shared read-only; caller owns lifetime
-    sdf_dict: ?*const zreduce.ccd.ComponentDict = null, // SDF-derived topology; caller owns lifetime
+    dict: ?*const zhyd.ccd.ComponentDict = null, // shared read-only; caller owns lifetime
+    sdf_dict: ?*const zhyd.ccd.ComponentDict = null, // SDF-derived topology; caller owns lifetime
     json_path: ?[]const u8 = null,
     state_json_path: ?[]const u8 = null,
     json_version: []const u8 = "", // version string for JSON log (passed from main)
@@ -23,9 +23,9 @@ pub const ProcessConfig = struct {
     validate_flag: bool = false,
     opt_threads: u32 = 0, // 0 = auto; batch sets to 1
     quiet: bool = false, // suppress diagnostic prints (batch mode)
-    water: zreduce.place.WaterConfig = .{},
-    bond_policy: zreduce.place.BondPolicy = .{},
-    nterm_mode: zreduce.place.NtermMode = .auto,
+    water: zhyd.place.WaterConfig = .{},
+    bond_policy: zhyd.place.BondPolicy = .{},
+    nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
     fix_path: ?[]const u8 = null,
     dump_movers_path: ?[]const u8 = null,
@@ -59,7 +59,7 @@ pub const InputFormat = enum {
     pdb,
 };
 
-pub const ModelFilter = zreduce.mmcif.ModelFilter;
+pub const ModelFilter = zhyd.mmcif.ModelFilter;
 
 /// Detect input format from file extension.
 pub fn detectFormat(path: []const u8) InputFormat {
@@ -76,14 +76,14 @@ pub fn detectFormat(path: []const u8) InputFormat {
 pub fn readFile(allocator: Allocator, path: []const u8) ![]const u8 {
     const io = defaultIo();
     if (std.mem.endsWith(u8, path, ".gz")) {
-        return zreduce.gzip.readGzip(allocator, path);
+        return zhyd.gzip.readGzip(allocator, path);
     }
     return try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024 * 1024));
 }
 
 /// Remove hydrogen rows from the CIF document's _atom_site loop.
 /// This keeps the document in sync with the model after stripHydrogens().
-pub fn stripDocumentHydrogens(block: *zreduce.cif.Block) void {
+pub fn stripDocumentHydrogens(block: *zhyd.cif.Block) void {
     const loop = block.findLoopMut("_atom_site.type_symbol") orelse return;
     const type_col = loop.findTag("_atom_site.type_symbol") orelse return;
     const w = loop.width();
@@ -132,13 +132,13 @@ pub fn stripDocumentHydrogens(block: *zreduce.cif.Block) void {
 ///   config                - full ProcessConfig for opt/validate/dump flags
 fn processModelShared(
     allocator: Allocator,
-    mdl: *zreduce.model.Model,
+    mdl: *zhyd.model.Model,
     model_num: u32,
     n_models: usize,
-    inline_dict: ?*const zreduce.ccd.ComponentDict,
-    protonation_overrides: ?*zreduce.place.ProtonationOverrides,
-    fix_overrides: ?*zreduce.optimize.fix.FixOverrides,
-    mover_snapshots: *std.ArrayListUnmanaged(zreduce.writer.json_writer.MoverSnapshot),
+    inline_dict: ?*const zhyd.ccd.ComponentDict,
+    protonation_overrides: ?*zhyd.place.ProtonationOverrides,
+    fix_overrides: ?*zhyd.optimize.fix.FixOverrides,
+    mover_snapshots: *std.ArrayListUnmanaged(zhyd.writer.json_writer.MoverSnapshot),
     result: *ProcessResult,
     config: ProcessConfig,
     sw: *Stopwatch,
@@ -148,14 +148,14 @@ fn processModelShared(
     }
 
     // Apply chemistry annotations
-    zreduce.place.applyChemistryWithConfig(mdl, .{
+    zhyd.place.applyChemistryWithConfig(mdl, .{
         .protonation = protonation_overrides,
         .nterm_mode = config.nterm_mode,
     });
     sw.lapInto(&result.timing, .chemistry);
 
     // Place hydrogens
-    const place_result = try zreduce.place.addHydrogensWithConfig(
+    const place_result = try zhyd.place.addHydrogensWithConfig(
         mdl,
         config.dict,
         inline_dict,
@@ -180,7 +180,7 @@ fn processModelShared(
     // Generate movers and optimize
     const needs_movers = !config.no_opt or config.fix_path != null or config.dump_movers_path != null;
     if (needs_movers) {
-        const gen_result = try zreduce.optimize.generateMovers(
+        const gen_result = try zhyd.optimize.generateMovers(
             allocator,
             mdl,
             config.no_flip,
@@ -197,7 +197,7 @@ fn processModelShared(
         result.n_movers += @intCast(movers.len);
 
         if (fix_overrides) |ov| {
-            try zreduce.optimize.fix.applyFixes(ov, mdl, movers);
+            try zhyd.optimize.fix.applyFixes(ov, mdl, movers);
             for (movers) |*m| {
                 if (m.is_fixed) m.applyOrientation(mdl.atoms.items, m.best_orientation);
             }
@@ -210,12 +210,12 @@ fn processModelShared(
             const dump_file = try std.Io.Dir.cwd().createFile(io, dump_path, .{});
             defer dump_file.close(io);
             var dump_fw = dump_file.writer(io, &dump_buf);
-            try zreduce.optimize.fix.dumpMovers(&dump_fw.interface, mdl, movers);
+            try zhyd.optimize.fix.dumpMovers(&dump_fw.interface, mdl, movers);
             try dump_fw.interface.flush();
         }
 
         if (!config.no_opt and movers.len > 0) {
-            const opt_result = try zreduce.optimize.optimizer.optimize(
+            const opt_result = try zhyd.optimize.optimizer.optimize(
                 allocator,
                 movers,
                 mdl,
@@ -231,7 +231,7 @@ fn processModelShared(
             try mover_snapshots.ensureUnusedCapacity(allocator, movers.len);
             for (movers) |m| {
                 mover_snapshots.appendAssumeCapacity(
-                    zreduce.writer.json_writer.MoverSnapshot.capture(m, mdl.residues.items, mdl.chains.items, model_num),
+                    zhyd.writer.json_writer.MoverSnapshot.capture(m, mdl.residues.items, mdl.chains.items, model_num),
                 );
             }
         }
@@ -243,28 +243,28 @@ fn processModelShared(
 
     // Validate
     {
-        var validation = try zreduce.validate.validateModel(allocator, mdl);
+        var validation = try zhyd.validate.validateModel(allocator, mdl);
         defer validation.deinit();
 
         if (!validation.ok()) {
             if (!config.quiet) std.debug.print("  Model {d}: {d} validation issue(s)\n", .{ model_num, validation.issues.len });
             if (config.validate_flag) {
-                zreduce.validate.reportIssues(validation.issues, mdl);
+                zhyd.validate.reportIssues(validation.issues, mdl);
             }
         }
     }
     sw.lapInto(&result.timing, .validate);
 }
 
-fn markAbsentHydrogens(mdl: *zreduce.model.Model) void {
+fn markAbsentHydrogens(mdl: *zhyd.model.Model) void {
     for (mdl.atoms.items) |*atom| {
-        if (zreduce.optimize.mover.isAbsentH(atom.*)) {
+        if (zhyd.optimize.mover.isAbsentH(atom.*)) {
             atom.is_added = false;
         }
     }
 }
 
-fn countAddedHydrogens(mdl: *const zreduce.model.Model) u32 {
+fn countAddedHydrogens(mdl: *const zhyd.model.Model) u32 {
     var count: u32 = 0;
     for (mdl.atoms.items) |atom| {
         if (atom.is_added and atom.is_hydrogen) count += 1;
@@ -293,7 +293,7 @@ pub fn processFile(allocator: Allocator, config: ProcessConfig) !ProcessResult {
 /// mmCIF pipeline: supports multi-model processing.
 fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const u8, stopwatch: *Stopwatch) !ProcessResult {
     // 2. Parse CIF document (for preserving non-atom_site categories in output)
-    var doc = try zreduce.cif.readString(allocator, source);
+    var doc = try zhyd.cif.readString(allocator, source);
     defer doc.deinit();
 
     // 2a. Strip existing hydrogens from the document BEFORE parsing models.
@@ -317,7 +317,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     // 3. Extract models from CIF block (shares the same doc — no double parse).
     // When strip_h is active, models are parsed from the already-stripped loop,
     // so they contain no H atoms and row indices match the stripped document.
-    var entries = try zreduce.mmcif.parseModelsFromBlock(allocator, &doc.blocks.items[0], config.model_filter);
+    var entries = try zhyd.mmcif.parseModelsFromBlock(allocator, &doc.blocks.items[0], config.model_filter);
     defer {
         for (entries.items) |*e| e.model.deinit();
         entries.deinit(allocator);
@@ -342,27 +342,27 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     }
 
     // 3b. Parse inline components (once — model-independent)
-    var inline_dict: ?zreduce.ccd.ComponentDict = null;
+    var inline_dict: ?zhyd.ccd.ComponentDict = null;
     defer if (inline_dict) |*d| d.deinit();
     const block = &doc.blocks.items[0];
-    inline_dict = try zreduce.mmcif.parseInlineComponents(allocator, block);
+    inline_dict = try zhyd.mmcif.parseInlineComponents(allocator, block);
     var parse_times = StageTimes{};
     stopwatch.lapInto(&parse_times, .parse);
 
     // Parse overrides (once — shared across models)
-    var protonation_overrides: ?zreduce.place.ProtonationOverrides = null;
+    var protonation_overrides: ?zhyd.place.ProtonationOverrides = null;
     defer if (protonation_overrides) |*ov| ov.deinit();
     if (config.protonation_path) |path| {
-        protonation_overrides = zreduce.place.protonation.parseFile(allocator, path) catch |err| {
+        protonation_overrides = zhyd.place.protonation.parseFile(allocator, path) catch |err| {
             std.debug.print("Error: failed to load protonation override file '{s}': {s}\n", .{ path, @errorName(err) });
             return err;
         };
     }
 
-    var fix_overrides: ?zreduce.optimize.fix.FixOverrides = null;
+    var fix_overrides: ?zhyd.optimize.fix.FixOverrides = null;
     defer if (fix_overrides) |*ov| ov.deinit();
     if (config.fix_path) |path| {
-        fix_overrides = zreduce.optimize.fix.parseFile(allocator, path) catch |err| {
+        fix_overrides = zhyd.optimize.fix.parseFile(allocator, path) catch |err| {
             std.debug.print("Error: failed to load fix override file '{s}': {s}\n", .{ path, @errorName(err) });
             return err;
         };
@@ -380,20 +380,20 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     stopwatch.lapInto(&result.timing, .load);
 
     // Accumulate mover snapshots for JSON log (movers are freed per model)
-    var mover_snapshots = std.ArrayListUnmanaged(zreduce.writer.json_writer.MoverSnapshot).empty;
+    var mover_snapshots = std.ArrayListUnmanaged(zhyd.writer.json_writer.MoverSnapshot).empty;
     defer mover_snapshots.deinit(allocator);
 
     for (entries.items) |*entry| {
         const mdl = &entry.model;
 
         // Build per-model atom lookup for bond parsing (mmCIF-specific)
-        var atom_lookup = try zreduce.mmcif.buildAtomLookupForRange(allocator, block, entry.cif_row_start, entry.cif_row_end);
+        var atom_lookup = try zhyd.mmcif.buildAtomLookupForRange(allocator, block, entry.cif_row_start, entry.cif_row_end);
         defer atom_lookup.deinit();
 
         // mmCIF-specific: parse bonds from struct_conn/branch_link and flag leaving atoms
-        try zreduce.mmcif.parseStructConn(mdl, block, &atom_lookup);
-        try zreduce.mmcif.parseBranchLinks(allocator, mdl, block, &atom_lookup);
-        zreduce.mmcif.flagLeavingAtoms(mdl, if (inline_dict) |*d| d else null, config.dict);
+        try zhyd.mmcif.parseStructConn(mdl, block, &atom_lookup);
+        try zhyd.mmcif.parseBranchLinks(allocator, mdl, block, &atom_lookup);
+        zhyd.mmcif.flagLeavingAtoms(mdl, if (inline_dict) |*d| d else null, config.dict);
         stopwatch.lapInto(&result.timing, .parse);
 
         // Shared per-model pipeline: chemistry → place → movers/opt → markAbsent → validate → snapshot
@@ -425,21 +425,21 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     var out_buf: [4096]u8 = undefined;
     if (config.output_path) |out_path| {
         if (std.mem.endsWith(u8, out_path, ".gz")) {
-            var gw = try zreduce.gzip.GzipWriter.init(allocator, out_path);
+            var gw = try zhyd.gzip.GzipWriter.init(allocator, out_path);
             errdefer gw.close() catch {};
-            try zreduce.writer.mmcif_writer.writeMultiModelWithDocumentWithPolicy(gw.writer(), entries.items, &doc, config.bond_policy);
+            try zhyd.writer.mmcif_writer.writeMultiModelWithDocumentWithPolicy(gw.writer(), entries.items, &doc, config.bond_policy);
             try gw.close();
         } else {
             const file = try std.Io.Dir.cwd().createFile(io, out_path, .{});
             defer file.close(io);
             var fw = file.writer(io, &out_buf);
-            try zreduce.writer.mmcif_writer.writeMultiModelWithDocumentWithPolicy(&fw.interface, entries.items, &doc, config.bond_policy);
+            try zhyd.writer.mmcif_writer.writeMultiModelWithDocumentWithPolicy(&fw.interface, entries.items, &doc, config.bond_policy);
             try fw.interface.flush();
         }
     } else {
         const stdout = std.Io.File.stdout();
         var sw = stdout.writer(io, &out_buf);
-        try zreduce.writer.mmcif_writer.writeMultiModelWithDocumentWithPolicy(&sw.interface, entries.items, &doc, config.bond_policy);
+        try zhyd.writer.mmcif_writer.writeMultiModelWithDocumentWithPolicy(&sw.interface, entries.items, &doc, config.bond_policy);
         try sw.interface.flush();
     }
 
@@ -451,7 +451,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
         var jw = file.writer(io, &json_buf);
         var total_added: u32 = 0;
         for (entries.items) |entry| total_added += countAddedHydrogens(&entry.model);
-        try zreduce.writer.json_writer.writeMultiModelLog(
+        try zhyd.writer.json_writer.writeMultiModelLog(
             &jw.interface,
             config.json_version,
             config.input_path,
@@ -463,7 +463,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     }
 
     if (config.state_json_path) |state_path| {
-        const reports = try allocator.alloc(zreduce.writer.protonation_json.StateReportModel, entries.items.len);
+        const reports = try allocator.alloc(zhyd.writer.protonation_json.StateReportModel, entries.items.len);
         defer allocator.free(reports);
         for (entries.items, 0..) |*entry, i| reports[i] = .{ .model_num = entry.model_num, .model = &entry.model };
         try writeStateReportFile(
@@ -482,7 +482,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
 
 /// PDB pipeline: supports multi-model processing.
 fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u8, stopwatch: *Stopwatch) !ProcessResult {
-    var pdb_result = try zreduce.pdb.parseAll(allocator, source, config.model_filter);
+    var pdb_result = try zhyd.pdb.parseAll(allocator, source, config.model_filter);
     defer pdb_result.deinit(allocator);
     var parse_times = StageTimes{};
     stopwatch.lapInto(&parse_times, .parse);
@@ -499,19 +499,19 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
     }
 
     // Parse overrides (once — shared across models)
-    var protonation_overrides: ?zreduce.place.ProtonationOverrides = null;
+    var protonation_overrides: ?zhyd.place.ProtonationOverrides = null;
     defer if (protonation_overrides) |*ov| ov.deinit();
     if (config.protonation_path) |path| {
-        protonation_overrides = zreduce.place.protonation.parseFile(allocator, path) catch |err| {
+        protonation_overrides = zhyd.place.protonation.parseFile(allocator, path) catch |err| {
             std.debug.print("Error: failed to load protonation override file '{s}': {s}\n", .{ path, @errorName(err) });
             return err;
         };
     }
 
-    var fix_overrides: ?zreduce.optimize.fix.FixOverrides = null;
+    var fix_overrides: ?zhyd.optimize.fix.FixOverrides = null;
     defer if (fix_overrides) |*ov| ov.deinit();
     if (config.fix_path) |path| {
-        fix_overrides = zreduce.optimize.fix.parseFile(allocator, path) catch |err| {
+        fix_overrides = zhyd.optimize.fix.parseFile(allocator, path) catch |err| {
             std.debug.print("Error: failed to load fix override file '{s}': {s}\n", .{ path, @errorName(err) });
             return err;
         };
@@ -527,7 +527,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
     };
     stopwatch.lapInto(&result.timing, .load);
 
-    var mover_snapshots = std.ArrayListUnmanaged(zreduce.writer.json_writer.MoverSnapshot).empty;
+    var mover_snapshots = std.ArrayListUnmanaged(zhyd.writer.json_writer.MoverSnapshot).empty;
     defer mover_snapshots.deinit(allocator);
 
     for (pdb_result.entries.items) |*entry| {
@@ -567,21 +567,21 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
     var out_buf: [4096]u8 = undefined;
     if (config.output_path) |out_path| {
         if (std.mem.endsWith(u8, out_path, ".gz")) {
-            var gw = try zreduce.gzip.GzipWriter.init(allocator, out_path);
+            var gw = try zhyd.gzip.GzipWriter.init(allocator, out_path);
             errdefer gw.close() catch {};
-            try zreduce.writer.pdb_writer.writeMultiModel(gw.writer(), pdb_result.entries.items, pdb_result.header_records.items, config.bond_policy.output_isotope);
+            try zhyd.writer.pdb_writer.writeMultiModel(gw.writer(), pdb_result.entries.items, pdb_result.header_records.items, config.bond_policy.output_isotope);
             try gw.close();
         } else {
             const file = try std.Io.Dir.cwd().createFile(io, out_path, .{});
             defer file.close(io);
             var fw = file.writer(io, &out_buf);
-            try zreduce.writer.pdb_writer.writeMultiModel(&fw.interface, pdb_result.entries.items, pdb_result.header_records.items, config.bond_policy.output_isotope);
+            try zhyd.writer.pdb_writer.writeMultiModel(&fw.interface, pdb_result.entries.items, pdb_result.header_records.items, config.bond_policy.output_isotope);
             try fw.interface.flush();
         }
     } else {
         const stdout = std.Io.File.stdout();
         var sw = stdout.writer(io, &out_buf);
-        try zreduce.writer.pdb_writer.writeMultiModel(&sw.interface, pdb_result.entries.items, pdb_result.header_records.items, config.bond_policy.output_isotope);
+        try zhyd.writer.pdb_writer.writeMultiModel(&sw.interface, pdb_result.entries.items, pdb_result.header_records.items, config.bond_policy.output_isotope);
         try sw.interface.flush();
     }
 
@@ -592,7 +592,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
         var jw = file.writer(io, &json_buf);
         var total_added: u32 = 0;
         for (pdb_result.entries.items) |entry| total_added += countAddedHydrogens(&entry.model);
-        try zreduce.writer.json_writer.writeMultiModelLog(
+        try zhyd.writer.json_writer.writeMultiModelLog(
             &jw.interface,
             config.json_version,
             config.input_path,
@@ -604,7 +604,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
     }
 
     if (config.state_json_path) |state_path| {
-        const reports = try allocator.alloc(zreduce.writer.protonation_json.StateReportModel, pdb_result.entries.items.len);
+        const reports = try allocator.alloc(zhyd.writer.protonation_json.StateReportModel, pdb_result.entries.items.len);
         defer allocator.free(reports);
         for (pdb_result.entries.items, 0..) |*entry, i| reports[i] = .{ .model_num = entry.model_num, .model = &entry.model };
         try writeStateReportFile(
@@ -625,16 +625,16 @@ fn writeStateReportFile(
     path: []const u8,
     input_path: []const u8,
     coordinate_path: ?[]const u8,
-    reports: []const zreduce.writer.protonation_json.StateReportModel,
-    overrides: ?*const zreduce.place.ProtonationOverrides,
-    nterm_mode: zreduce.place.NtermMode,
+    reports: []const zhyd.writer.protonation_json.StateReportModel,
+    overrides: ?*const zhyd.place.ProtonationOverrides,
+    nterm_mode: zhyd.place.NtermMode,
 ) !void {
     const io = defaultIo();
     var buffer: [4096]u8 = undefined;
     const file = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
     var fw = file.writer(io, &buffer);
-    try zreduce.writer.protonation_json.writeStateReport(&fw.interface, input_path, coordinate_path, reports, overrides, nterm_mode);
+    try zhyd.writer.protonation_json.writeStateReport(&fw.interface, input_path, coordinate_path, reports, overrides, nterm_mode);
     try fw.interface.flush();
 }
 
@@ -695,11 +695,11 @@ test "stripDocumentHydrogens removes H and D rows from _atom_site loop" {
     // After strip: N(1), CA(3), C(5) — 3 rows remain.
     const allocator = std.testing.allocator;
 
-    var block = zreduce.cif.Block{ .name = "TEST", .items = .empty };
+    var block = zhyd.cif.Block{ .name = "TEST", .items = .empty };
     defer block.deinit(allocator);
 
     // Append a loop item
-    var loop = zreduce.cif.Loop{};
+    var loop = zhyd.cif.Loop{};
 
     try loop.tags.append(allocator, "_atom_site.type_symbol");
     try loop.tags.append(allocator, "_atom_site.label_atom_id");
@@ -747,10 +747,10 @@ test "stripDocumentHydrogens removes H and D rows from _atom_site loop" {
 test "stripDocumentHydrogens is no-op when loop has no H atoms" {
     const allocator = std.testing.allocator;
 
-    var block = zreduce.cif.Block{ .name = "TEST", .items = .empty };
+    var block = zhyd.cif.Block{ .name = "TEST", .items = .empty };
     defer block.deinit(allocator);
 
-    var loop = zreduce.cif.Loop{};
+    var loop = zhyd.cif.Loop{};
     try loop.tags.append(allocator, "_atom_site.type_symbol");
     try loop.tags.append(allocator, "_atom_site.id");
 

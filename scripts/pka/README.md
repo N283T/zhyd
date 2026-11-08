@@ -9,7 +9,7 @@ Install PROPKA separately under its own LGPL-2.1 terms, then run:
 
 ```sh
 python3 scripts/pka/run_propka_oracle.py structures/*.pdb --output-dir oracle/
-zreduce pka structures/1abc.pdb -o predictions/1abc.json
+zhyd pka structures/1abc.pdb -o predictions/1abc.json
 python3 scripts/pka/compare_propka.py --zhyd predictions/1abc.json --propka oracle/1abc.pka -o comparisons/1abc.csv
 ```
 
@@ -18,13 +18,13 @@ output. No PROPKA source or parameters are imported.
 
 ## Engine parity (zhyd reports)
 
-Compare two `zreduce pka` reports on the same input, e.g. the zpropka oracle
+Compare two `zhyd pka` reports on the same input, e.g. the zpropka oracle
 against the empirical engine
 ([spec](../../docs/specs/zhyd-pka-empirical-engine.md)):
 
 ```sh
-zreduce pka 1abc.cif --engine propka -o oracle/1abc.json
-zreduce pka 1abc.cif --engine empirical -o candidate/1abc.json
+zhyd pka 1abc.cif --engine propka -o oracle/1abc.json
+zhyd pka 1abc.cif --engine empirical -o candidate/1abc.json
 python3 scripts/pka/compare_engines.py --oracle oracle/1abc.json --candidate candidate/1abc.json -o parity/1abc.csv
 ```
 
@@ -46,8 +46,8 @@ python3 scripts/pka/pkadr.py predict canonical.csv --structures structures/ \
 python3 scripts/pka/evaluate.py predictions.csv --output metrics.json
 ```
 
-`predict --engine NAME` selects the zreduce pKa engine, and `--extra-arg ARG`
-(repeatable) appends options to the `zreduce pka` command, e.g.
+`predict --engine NAME` selects the zhyd pKa engine, and `--extra-arg ARG`
+(repeatable) appends options to the `zhyd pka` command, e.g.
 `--engine empirical --extra-arg=--empirical-fixes --extra-arg=Q2,Q7` for one
 ablation run of the empirical engine.
 

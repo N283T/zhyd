@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const options_module = options.createModule();
 
     // Library module
-    const mod = b.addModule("zreduce", .{
+    const mod = b.addModule("zhyd", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{.{ .name = "build_options", .module = options_module }},
@@ -35,19 +35,19 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "zreduce", .module = mod },
+            .{ .name = "zhyd", .module = mod },
             .{ .name = "build_options", .module = options_module },
         },
     });
 
     const exe = b.addExecutable(.{
-        .name = "zreduce",
+        .name = "zhyd",
         .root_module = exe_module,
     });
     b.installArtifact(exe);
 
     // Run step
-    const run_step = b.step("run", "Run zreduce");
+    const run_step = b.step("run", "Run zhyd");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());

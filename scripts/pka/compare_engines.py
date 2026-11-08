@@ -2,7 +2,7 @@
 """Compare two zhyd pKa reports site by site (oracle vs candidate engine).
 
 Used for the parity gate of the empirical engine
-(docs/specs/zhyd-pka-empirical-engine.md): run `zreduce pka` once with the
+(docs/specs/zhyd-pka-empirical-engine.md): run `zhyd pka` once with the
 oracle engine and once with the candidate on the same input, then compare.
 Exit status is 1 when a tolerance is exceeded or the site sets differ.
 """

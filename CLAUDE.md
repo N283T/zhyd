@@ -1,6 +1,6 @@
-# CLAUDE.md — zreduce project instructions
+# CLAUDE.md — zhyd project instructions
 
-## What is zreduce?
+## What is zhyd?
 
 A Zig implementation of the [reduce](https://github.com/rlabduke/reduce) hydrogen placement tool for macromolecular structures (mmCIF format). Reads mmCIF, adds hydrogen atoms, optimizes orientations via clique-based scoring.
 
@@ -16,20 +16,20 @@ zig build test --summary all        # Run all tests (~490)
 
 ```bash
 # Single file
-./zig-out/bin/zreduce run input.cif -o output.cif
-./zig-out/bin/zreduce run input.cif -d components.cif -o output.cif  # with CCD
-./zig-out/bin/zreduce run input.cif -d components.cif --sdf ligand.sdf -o output.cif  # with SDF
-./zig-out/bin/zreduce run input.cif -o output.cif --validate         # with diagnostics
+./zig-out/bin/zhyd run input.cif -o output.cif
+./zig-out/bin/zhyd run input.cif -d components.cif -o output.cif  # with CCD
+./zig-out/bin/zhyd run input.cif -d components.cif --sdf ligand.sdf -o output.cif  # with SDF
+./zig-out/bin/zhyd run input.cif -o output.cif --validate         # with diagnostics
 
 # Batch processing (parallel)
-./zig-out/bin/zreduce batch input_dir/ -o output_dir/
-./zig-out/bin/zreduce batch input_dir/ -d components.cif --jsonl log.jsonl
-./zig-out/bin/zreduce batch input_dir/ -j 4  # limit to 4 threads
-./zig-out/bin/zreduce batch input_dir/ --timing  # per-stage timing to stderr
+./zig-out/bin/zhyd batch input_dir/ -o output_dir/
+./zig-out/bin/zhyd batch input_dir/ -d components.cif --jsonl log.jsonl
+./zig-out/bin/zhyd batch input_dir/ -j 4  # limit to 4 threads
+./zig-out/bin/zhyd batch input_dir/ --timing  # per-stage timing to stderr
 
 # pKa reports (single file or directory batch)
-./zig-out/bin/zreduce pka input.cif -o pka.json
-./zig-out/bin/zreduce pka input_dir/ -o pka_dir/ -j 8 --jsonl pka.jsonl
+./zig-out/bin/zhyd pka input.cif -o pka.json
+./zig-out/bin/zhyd pka input_dir/ -o pka_dir/ -j 8 --jsonl pka.jsonl
 ```
 
 ## Project structure
@@ -113,7 +113,7 @@ src/
   test_data/            Test CIF/PDB fixtures
 examples/
   data/                 Input structures (AF models, fold_test2)
-  result/               zreduce output
+  result/               zhyd output
 ```
 
 ## Key conventions

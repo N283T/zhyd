@@ -1,5 +1,5 @@
 const std = @import("std");
-const zreduce = @import("zreduce");
+const zhyd = @import("zhyd");
 const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
@@ -18,27 +18,27 @@ const RunConfig = struct {
     no_opt: bool = false,
     no_flip: bool = false,
     validate: bool = false,
-    water: zreduce.place.WaterConfig = .{},
-    bond_policy: zreduce.place.BondPolicy = .{},
-    nterm_mode: zreduce.place.NtermMode = .auto,
+    water: zhyd.place.WaterConfig = .{},
+    bond_policy: zhyd.place.BondPolicy = .{},
+    nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
     fix_path: ?[]const u8 = null,
     dump_movers_path: ?[]const u8 = null,
     strip_h: bool = false,
-    model_filter: zreduce.run.ModelFilter = .all,
+    model_filter: zhyd.run.ModelFilter = .all,
     show_timing: bool = false,
 };
 
 const PkaConfig = struct {
     input_path: []const u8,
     output_path: ?[]const u8 = null,
-    model_filter: zreduce.run.ModelFilter = .all,
+    model_filter: zhyd.run.ModelFilter = .all,
     model_only: bool = false,
     parameters_path: ?[]const u8 = null,
     engine: ?PkaEngine = null,
     propka_keep_waters: bool = false,
-    empirical_mode: ?zreduce.pka_empirical.Mode = null,
-    empirical_fixes: ?zreduce.pka_empirical.Fixes = null,
+    empirical_mode: ?zhyd.pka_empirical.Mode = null,
+    empirical_fixes: ?zhyd.pka_empirical.Fixes = null,
     show_timing: bool = false,
     // Directory input only:
     n_threads: ?u32 = null,
@@ -46,29 +46,29 @@ const PkaConfig = struct {
     quiet: bool = false,
 };
 
-const PkaEngine = zreduce.pka_run.Engine;
+const PkaEngine = zhyd.pka_run.Engine;
 
 /// Fields shared between RunConfig and BatchConfig, parsed by parseCommonOption.
 const CommonOptions = struct {
     no_opt: bool = false,
     no_flip: bool = false,
-    water: zreduce.place.WaterConfig = .{},
-    bond_policy: zreduce.place.BondPolicy = .{},
-    nterm_mode: zreduce.place.NtermMode = .auto,
+    water: zhyd.place.WaterConfig = .{},
+    bond_policy: zhyd.place.BondPolicy = .{},
+    nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
     fix_path: ?[]const u8 = null,
     sdf_path: ?[]const u8 = null,
     strip_h: bool = false,
-    model_filter: zreduce.run.ModelFilter = .all,
+    model_filter: zhyd.run.ModelFilter = .all,
 };
 
-fn parseBondModeValue(s: []const u8) ?zreduce.place.BondLengthMode {
+fn parseBondModeValue(s: []const u8) ?zhyd.place.BondLengthMode {
     if (std.ascii.eqlIgnoreCase(s, "neutron")) return .neutron;
     if (std.ascii.eqlIgnoreCase(s, "xray")) return .xray;
     return null;
 }
 
-fn parseOutputIsotopeValue(s: []const u8) ?zreduce.place.OutputIsotope {
+fn parseOutputIsotopeValue(s: []const u8) ?zhyd.place.OutputIsotope {
     if (std.ascii.eqlIgnoreCase(s, "hydrogen") or std.ascii.eqlIgnoreCase(s, "h")) return .hydrogen;
     if (std.ascii.eqlIgnoreCase(s, "deuterium") or std.ascii.eqlIgnoreCase(s, "d")) return .deuterium;
     return null;
@@ -147,7 +147,7 @@ fn parseCommonOption(args: []const []const u8, i: *usize, common: *CommonOptions
             std.debug.print("Error: --nterm requires 'auto', 'aggressive', or 'neutral'\n", .{});
             std.process.exit(1);
         }
-        const parsed = zreduce.place.NtermMode.fromString(args[i.*]) orelse {
+        const parsed = zhyd.place.NtermMode.fromString(args[i.*]) orelse {
             std.debug.print("Error: invalid --nterm '{s}' (expected auto|aggressive|neutral)\n", .{args[i.*]});
             std.process.exit(1);
         };
@@ -359,7 +359,7 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
                 std.debug.print("Error: --empirical-mode requires 'parity' or 'zhyd'\n", .{});
                 std.process.exit(1);
             }
-            config.empirical_mode = std.meta.stringToEnum(zreduce.pka_empirical.Mode, args[i]) orelse {
+            config.empirical_mode = std.meta.stringToEnum(zhyd.pka_empirical.Mode, args[i]) orelse {
                 std.debug.print("Error: unknown --empirical-mode '{s}' (use 'parity' or 'zhyd')\n", .{args[i]});
                 std.process.exit(1);
             };
@@ -369,7 +369,7 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
                 std.debug.print("Error: --empirical-fixes requires a list such as 'Q2,Q7' or 'none'\n", .{});
                 std.process.exit(1);
             }
-            config.empirical_fixes = zreduce.pka_empirical.Fixes.parse(args[i]) catch {
+            config.empirical_fixes = zhyd.pka_empirical.Fixes.parse(args[i]) catch {
                 std.debug.print("Error: invalid --empirical-fixes '{s}' (comma-separated Q1..Q8, or 'none')\n", .{args[i]});
                 std.process.exit(1);
             };
@@ -417,7 +417,7 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
 
 fn printUsage(program_name: []const u8) void {
     std.debug.print(
-        \\zreduce {s} - Hydrogen placement for mmCIF/PDB structures
+        \\zhyd {s} - Hydrogen placement for mmCIF/PDB structures
         \\
         \\USAGE:
         \\    {s} <command> [OPTIONS] <args>
@@ -441,8 +441,8 @@ fn printUsage(program_name: []const u8) void {
 fn printPkaUsage() void {
     std.debug.print(
         \\USAGE:
-        \\    zreduce pka [OPTIONS] <input.cif|input.pdb>
-        \\    zreduce pka [OPTIONS] <input_dir> [-o <output_dir>]
+        \\    zhyd pka [OPTIONS] <input.cif|input.pdb>
+        \\    zhyd pka [OPTIONS] <input_dir> [-o <output_dir>]
         \\
         \\EXPERIMENTAL:
         \\    Predict pKa values and write a versioned JSON report. This command
@@ -488,7 +488,7 @@ fn printPkaUsage() void {
 fn printRunUsage() void {
     std.debug.print(
         \\USAGE:
-        \\    zreduce run [OPTIONS] <input.cif|input.pdb>
+        \\    zhyd run [OPTIONS] <input.cif|input.pdb>
         \\
         \\OPTIONS:
         \\    -h, --help         Show this help message
@@ -542,7 +542,7 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
     if (std.mem.eql(u8, subcmd, "-V") or std.mem.eql(u8, subcmd, "--version")) {
-        std.debug.print("zreduce {s}\n", .{build_options.version});
+        std.debug.print("zhyd {s}\n", .{build_options.version});
         return;
     }
 
@@ -561,8 +561,8 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-fn parseBatchArgs(args: []const []const u8) ?zreduce.batch.BatchConfig {
-    var config = zreduce.batch.BatchConfig{ .input_dir = undefined };
+fn parseBatchArgs(args: []const []const u8) ?zhyd.batch.BatchConfig {
+    var config = zhyd.batch.BatchConfig{ .input_dir = undefined };
     var common = CommonOptions{};
     var input_set = false;
     var i: usize = 0;
@@ -647,7 +647,7 @@ fn parseBatchArgs(args: []const []const u8) ?zreduce.batch.BatchConfig {
 fn printBatchUsage() void {
     std.debug.print(
         \\USAGE:
-        \\    zreduce batch [OPTIONS] <input_dir>
+        \\    zhyd batch [OPTIONS] <input_dir>
         \\
         \\OPTIONS:
         \\    -h, --help         Show this help message
@@ -730,7 +730,7 @@ fn parseCompileDictArgs(args: []const []const u8) ?CompileDictConfig {
 fn printCompileDictUsage() void {
     std.debug.print(
         \\USAGE:
-        \\    zreduce compile-dict [OPTIONS] <input.cif>
+        \\    zhyd compile-dict [OPTIONS] <input.cif>
         \\
         \\OPTIONS:
         \\    -h, --help         Show this help message
@@ -744,20 +744,20 @@ fn compileDictSubcommand(allocator: Allocator, args: []const []const u8) void {
     const config = parseCompileDictArgs(args) orelse return;
 
     // Read input
-    const source = zreduce.run.readFile(allocator, config.input_path) catch |err| {
+    const source = zhyd.run.readFile(allocator, config.input_path) catch |err| {
         std.debug.print("Error: cannot read '{s}': {s}\n", .{ config.input_path, @errorName(err) });
         std.process.exit(1);
     };
     defer allocator.free(source);
 
     // Reject if already binary
-    if (zreduce.ccd_binary.isBinaryDict(source)) {
+    if (zhyd.ccd_binary.isBinaryDict(source)) {
         std.debug.print("Error: input is already a compiled dictionary\n", .{});
         std.process.exit(1);
     }
 
     // Parse CIF
-    var dict = zreduce.ccd.parseComponentDict(allocator, source) catch |err| {
+    var dict = zhyd.ccd.parseComponentDict(allocator, source) catch |err| {
         std.debug.print("Error: failed to parse CCD dictionary: {s}\n", .{@errorName(err)});
         std.process.exit(1);
     };
@@ -773,7 +773,7 @@ fn compileDictSubcommand(allocator: Allocator, args: []const []const u8) void {
 
     var write_buf: [65536]u8 = undefined;
     var file_writer = file.writer(io, &write_buf);
-    zreduce.ccd_binary.writeDict(&file_writer.interface, &dict) catch |err| {
+    zhyd.ccd_binary.writeDict(&file_writer.interface, &dict) catch |err| {
         std.debug.print("Error: failed to write binary dictionary: {s}\n", .{@errorName(err)});
         std.Io.Dir.cwd().deleteFile(io, output_path) catch {};
         std.process.exit(1);
@@ -789,7 +789,7 @@ fn compileDictSubcommand(allocator: Allocator, args: []const []const u8) void {
 
 fn batchSubcommand(allocator: Allocator, args: []const []const u8) void {
     const config = parseBatchArgs(args) orelse return;
-    zreduce.batch.run(allocator, config) catch |err| {
+    zhyd.batch.run(allocator, config) catch |err| {
         switch (err) {
             error.SomeFilesFailed, error.NoFilesFound => {},
             else => std.debug.print("Error: batch processing failed: {s}\n", .{@errorName(err)}),
@@ -800,17 +800,17 @@ fn batchSubcommand(allocator: Allocator, args: []const []const u8) void {
 
 fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     const config = parseRunArgs(args) orelse return;
-    var wall = zreduce.timing.Stopwatch.start();
+    var wall = zhyd.timing.Stopwatch.start();
 
     // Load CCD dictionary (once, before processFile)
-    var ccd_dict: ?zreduce.ccd.ComponentDict = null;
+    var ccd_dict: ?zhyd.ccd.ComponentDict = null;
     if (config.dict_path) |dict_path| {
-        const dict_source = zreduce.run.readFile(allocator, dict_path) catch |err| {
+        const dict_source = zhyd.run.readFile(allocator, dict_path) catch |err| {
             std.debug.print("Error: cannot read dictionary '{s}': {s}\n", .{ dict_path, @errorName(err) });
             std.process.exit(1);
         };
         defer allocator.free(dict_source);
-        ccd_dict = zreduce.ccd_binary.loadDict(allocator, dict_source) catch |err| {
+        ccd_dict = zhyd.ccd_binary.loadDict(allocator, dict_source) catch |err| {
             std.debug.print("Error: failed to load CCD dictionary: {s}\n", .{@errorName(err)});
             std.process.exit(1);
         };
@@ -818,14 +818,14 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     defer if (ccd_dict) |*d| d.deinit();
 
     // Load SDF topology dictionary (optional)
-    var sdf_dict: ?zreduce.ccd.ComponentDict = null;
+    var sdf_dict: ?zhyd.ccd.ComponentDict = null;
     if (config.sdf_path) |sdf_path| {
-        const sdf_source = zreduce.run.readFile(allocator, sdf_path) catch |err| {
+        const sdf_source = zhyd.run.readFile(allocator, sdf_path) catch |err| {
             std.debug.print("Error: cannot read SDF file '{s}': {s}\n", .{ sdf_path, @errorName(err) });
             std.process.exit(1);
         };
         defer allocator.free(sdf_source);
-        sdf_dict = zreduce.sdf.parseSdf(allocator, sdf_source) catch |err| {
+        sdf_dict = zhyd.sdf.parseSdf(allocator, sdf_source) catch |err| {
             std.debug.print("Error: failed to parse SDF file: {s}\n", .{@errorName(err)});
             std.process.exit(1);
         };
@@ -833,7 +833,7 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     defer if (sdf_dict) |*d| d.deinit();
     const load_ns = wall.read();
 
-    const proc_config = zreduce.run.ProcessConfig{
+    const proc_config = zhyd.run.ProcessConfig{
         .input_path = config.input_path,
         .output_path = config.output_path,
         .dict = if (ccd_dict) |*d| d else null,
@@ -851,11 +851,11 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
         .fix_path = config.fix_path,
         .dump_movers_path = config.dump_movers_path,
         .strip_h = config.strip_h,
-        .format = zreduce.run.detectFormat(config.input_path),
+        .format = zhyd.run.detectFormat(config.input_path),
         .model_filter = config.model_filter,
     };
 
-    const result = zreduce.run.processFile(allocator, proc_config) catch |err| {
+    const result = zhyd.run.processFile(allocator, proc_config) catch |err| {
         std.debug.print("Error: processing failed: {s}\n", .{@errorName(err)});
         std.process.exit(1);
     };
@@ -869,7 +869,7 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
         });
     }
 
-    std.debug.print("zreduce: placed {d} H atoms on {d} residues ({d} skipped)\n", .{
+    std.debug.print("zhyd: placed {d} H atoms on {d} residues ({d} skipped)\n", .{
         result.n_placed,
         result.n_residues,
         result.totalSkipped(),
@@ -883,16 +883,16 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     if (config.show_timing) {
         var stages = result.timing;
         stages.addNs(.load, load_ns);
-        zreduce.timing.printStageProfile("RUN", &zreduce.batch.run_stages, stages, wall.read(), null);
+        zhyd.timing.printStageProfile("RUN", &zhyd.batch.run_stages, stages, wall.read(), null);
     }
 }
 
 /// Prediction options resolved from the command line, plus the parsed
 /// parameter files they borrow from.
 const ResolvedPka = struct {
-    options: zreduce.pka_run.Options,
-    parsed_params: ?std.json.Parsed(zreduce.pka.Parameters) = null,
-    parsed_overrides: ?std.json.Parsed(zreduce.pka_empirical.params.Overrides) = null,
+    options: zhyd.pka_run.Options,
+    parsed_params: ?std.json.Parsed(zhyd.pka.Parameters) = null,
+    parsed_overrides: ?std.json.Parsed(zhyd.pka_empirical.params.Overrides) = null,
 
     fn deinit(self: *ResolvedPka) void {
         if (self.parsed_params) |*p| p.deinit();
@@ -905,8 +905,8 @@ const ResolvedPka = struct {
 fn resolvePkaOptions(allocator: Allocator, config: PkaConfig) ResolvedPka {
     // --model-only is a builtin-engine feature, so it selects that engine.
     const engine = config.engine orelse if (config.model_only) PkaEngine.builtin else PkaEngine.default();
-    if (engine == .propka and !zreduce.pka_propka.available) {
-        std.debug.print("Error: this zreduce was built without PROPKA; rebuild with -Dpropka=true\n", .{});
+    if (engine == .propka and !zhyd.pka_propka.available) {
+        std.debug.print("Error: this zhyd was built without PROPKA; rebuild with -Dpropka=true\n", .{});
         std.process.exit(1);
     }
     const empirical_mode = config.empirical_mode orelse .zhyd;
@@ -925,32 +925,32 @@ fn resolvePkaOptions(allocator: Allocator, config: PkaConfig) ResolvedPka {
 
     var resolved = ResolvedPka{ .options = .{ .engine = engine } };
     if (config.parameters_path) |path| {
-        const json = zreduce.run.readFile(allocator, path) catch |err| {
+        const json = zhyd.run.readFile(allocator, path) catch |err| {
             std.debug.print("Error: cannot read parameters '{s}': {s}\n", .{ path, @errorName(err) });
             std.process.exit(1);
         };
         defer allocator.free(json);
         if (engine == .empirical) {
-            resolved.parsed_overrides = zreduce.pka_empirical.params.parseOverrides(allocator, json) catch |err| {
+            resolved.parsed_overrides = zhyd.pka_empirical.params.parseOverrides(allocator, json) catch |err| {
                 std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
                 std.process.exit(1);
             };
         } else {
-            resolved.parsed_params = zreduce.pka.parseParameters(allocator, json) catch |err| {
+            resolved.parsed_params = zhyd.pka.parseParameters(allocator, json) catch |err| {
                 std.debug.print("Error: invalid parameters '{s}': {s}\n", .{ path, @errorName(err) });
                 std.process.exit(1);
             };
         }
     }
-    const parameters: zreduce.pka.Parameters = if (resolved.parsed_params) |p| p.value else .{};
-    const empirical_options = zreduce.pka_empirical.Options{
+    const parameters: zhyd.pka.Parameters = if (resolved.parsed_params) |p| p.value else .{};
+    const empirical_options = zhyd.pka_empirical.Options{
         .mode = empirical_mode,
         .fixes = config.empirical_fixes,
         .overrides = if (resolved.parsed_overrides) |p| p.value else null,
     };
     switch (engine) {
         .builtin => std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version}),
-        .propka => std.debug.print("note: pKa engine {s}; states are reported, not applied to coordinates\n", .{zreduce.pka_propka.engine_version}),
+        .propka => std.debug.print("note: pKa engine {s}; states are reported, not applied to coordinates\n", .{zhyd.pka_propka.engine_version}),
         .empirical => std.debug.print("warning: pKa engine {s} ({s}) is experimental; states are reported, not applied to coordinates\n", .{
             empirical_options.engineName(),
             empirical_options.parameters().version,
@@ -985,10 +985,10 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         std.process.exit(1);
     }
 
-    const total = zreduce.timing.Stopwatch.start();
+    const total = zhyd.timing.Stopwatch.start();
     var wall = total;
-    var times = zreduce.timing.StageTimes{};
-    const source = zreduce.pka_run.readInput(allocator, config.input_path) catch |err| {
+    var times = zhyd.timing.StageTimes{};
+    const source = zhyd.pka_run.readInput(allocator, config.input_path) catch |err| {
         std.debug.print("Error: cannot read input '{s}': {s}\n", .{ config.input_path, @errorName(err) });
         std.process.exit(1);
     };
@@ -999,10 +999,10 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
     defer resolved.deinit();
     wall.lapInto(&times, .load);
 
-    var failure = zreduce.pka_run.Failure{};
-    _ = zreduce.pka_run.processSource(allocator, source, config.input_path, config.output_path, &resolved.options, &failure, &times) catch |err| {
+    var failure = zhyd.pka_run.Failure{};
+    _ = zhyd.pka_run.processSource(allocator, source, config.input_path, config.output_path, &resolved.options, &failure, &times) catch |err| {
         switch (failure.stage) {
-            .parse => if (zreduce.run.detectFormat(config.input_path) == .mmcif)
+            .parse => if (zhyd.run.detectFormat(config.input_path) == .mmcif)
                 std.debug.print("Error: failed to parse mmCIF: {s}\n", .{@errorName(err)})
             else
                 std.debug.print("Error: failed to parse PDB: {s}\n", .{@errorName(err)}),
@@ -1014,12 +1014,12 @@ fn pkaSubcommand(allocator: Allocator, args: []const []const u8) void {
         std.process.exit(1);
     };
     if (config.show_timing) {
-        zreduce.timing.printStageProfile("PKA", &zreduce.pka_run.stages, times, total.read(), null);
+        zhyd.timing.printStageProfile("PKA", &zhyd.pka_run.stages, times, total.read(), null);
     }
 }
 
 fn pkaBatchSubcommand(allocator: Allocator, config: PkaConfig) void {
-    var load = zreduce.timing.Stopwatch.start();
+    var load = zhyd.timing.Stopwatch.start();
     var resolved = resolvePkaOptions(allocator, config);
     defer resolved.deinit();
     var n_threads = config.n_threads orelse 0;
@@ -1028,7 +1028,7 @@ fn pkaBatchSubcommand(allocator: Allocator, config: PkaConfig) void {
         std.debug.print("note: --engine propka runs on 1 thread\n", .{});
         n_threads = 1;
     }
-    zreduce.pka_batch.run(allocator, .{
+    zhyd.pka_batch.run(allocator, .{
         .input_dir = config.input_path,
         .output_dir = config.output_path,
         .jsonl_path = config.jsonl_path,

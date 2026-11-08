@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-zreduce is MIT-licensed (see `LICENSE`). This file lists the external work it
+zhyd is MIT-licensed (see `LICENSE`). This file lists the external work it
 builds on, what of it (if anything) is included, and under which terms.
 
 ## reduce
@@ -8,7 +8,7 @@ builds on, what of it (if anything) is included, and under which terms.
 - **Used in**: hydrogen placement, scoring heuristics and bond topology tables
   (`src/place/`, `src/optimize/`)
 - **Source**: https://github.com/rlabduke/reduce
-- **What is included**: no source code. zreduce is an independent
+- **What is included**: no source code. zhyd is an independent
   reimplementation of the published method; the algorithm and parameters are
   owed to J. Michael Word and contributors (Word et al., J. Mol. Biol. 285,
   1735–1747, 1999).
@@ -32,7 +32,7 @@ builds on, what of it (if anything) is included, and under which terms.
 - **License**: LGPL-2.1-or-later, as PROPKA
 - **What is included**: nothing in the default build. The dependency is lazy
   and fetched only with `-Dpropka=true`; binaries built that way are subject
-  to the LGPL-2.1 for the zpropka part. Prebuilt or packaged zreduce
+  to the LGPL-2.1 for the zpropka part. Prebuilt or packaged zhyd
   distributions must not bundle it.
 
 ## zsasa

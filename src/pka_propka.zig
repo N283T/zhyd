@@ -1,4 +1,4 @@
-//! PROPKA 3.5.1 engine for `zreduce pka`, via the optional zpropka package.
+//! PROPKA 3.5.1 engine for `zhyd pka`, via the optional zpropka package.
 //!
 //! zpropka is a separate LGPL-2.1 package; it is only compiled in with
 //! `zig build -Dpropka=true`. Without it, `available` is false and `predict`
@@ -157,7 +157,7 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, options: Options
 
     var encoded = try encodePdb(allocator, mdl, options);
     defer encoded.deinit(allocator);
-    var result = try zpropka.api.predictPdb(allocator, encoded.pdb, "zreduce", .{});
+    var result = try zpropka.api.predictPdb(allocator, encoded.pdb, "zhyd", .{});
     defer result.deinit();
 
     const metals = try pka.metalPositions(allocator, mdl);

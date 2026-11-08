@@ -11,7 +11,7 @@ production). Schema v1.
 
 The long-term component prepares biomolecular structures by making three
 outputs explicit: protonation macrostate, formal charge, and hydrogen
-coordinates. The current executable and package remain named `zreduce`; `run`
+coordinates. The current executable and package remain named `zhyd`; `run`
 and `batch` behavior remains compatible.
 
 ## pKa engines and licensing
@@ -23,7 +23,7 @@ and `batch` behavior remains compatible.
 | `builtin` | `src/pka.zig` | MIT | Experimental, independently written; superseded as default, used for `--model-only` |
 
 zpropka is a faithful Zig port of PROPKA 3.5.1, kept in its own repository so
-the default zreduce build stays MIT-only. zreduce talks to it only through
+the default zhyd build stays MIT-only. zhyd talks to it only through
 `zpropka.api.predictPdb`, from `src/pka_propka.zig`, which:
 
 - writes heavy atoms as PDB text: single-character chain aliases for long
@@ -136,7 +136,7 @@ deep burial or strong coupling.
   burial shift to 0: the neighbor-count descriptor did not lower training
   error. Burial fraction is still computed for confidence and strata.
   Provenance: `scripts/pka/params/zhyd-pka-protein-v0.2.json`.
-- `zreduce pka --parameters PATH` loads a JSON parameter set for research or
+- `zhyd pka --parameters PATH` loads a JSON parameter set for research or
   recalibration. Unknown fields are rejected, and a non-default set must carry
   its own `version`, which the report echoes.
 

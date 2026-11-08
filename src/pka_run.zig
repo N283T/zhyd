@@ -1,12 +1,12 @@
-//! Per-file pKa prediction pipeline shared by `zreduce pka <file>` and
-//! `zreduce pka <dir>`: parse, annotate chemistry, predict, write the JSON
+//! Per-file pKa prediction pipeline shared by `zhyd pka <file>` and
+//! `zhyd pka <dir>`: parse, annotate chemistry, predict, write the JSON
 //! report. Errors are returned with the stage that failed; the caller decides
 //! whether to exit (single file) or record the failure and continue (batch).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const zreduce = @import("root.zig");
-const timing = zreduce.timing;
+const zhyd = @import("root.zig");
+const timing = zhyd.timing;
 
 fn defaultIo() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
@@ -20,7 +20,7 @@ pub const Engine = enum {
     /// PROPKA when compiled in (zig build -Dpropka=true), else the MIT
     /// empirical engine.
     pub fn default() Engine {
-        return if (zreduce.pka_propka.available) .propka else .empirical;
+        return if (zhyd.pka_propka.available) .propka else .empirical;
     }
 };
 
@@ -29,13 +29,13 @@ pub const Engine = enum {
 /// `Options` may be shared by all batch workers.
 pub const Options = struct {
     engine: Engine,
-    model_filter: zreduce.run.ModelFilter = .all,
-    prediction_config: zreduce.pka.Config = .{},
-    propka_options: zreduce.pka_propka.Options = .{},
-    empirical_options: zreduce.pka_empirical.Options = .{},
+    model_filter: zhyd.run.ModelFilter = .all,
+    prediction_config: zhyd.pka.Config = .{},
+    propka_options: zhyd.pka_propka.Options = .{},
+    empirical_options: zhyd.pka_empirical.Options = .{},
 };
 
-/// Stages reported by `zreduce pka --timing`, in pipeline order.
+/// Stages reported by `zhyd pka --timing`, in pipeline order.
 pub const stages = [_]timing.Stage{ .load, .read, .parse, .chemistry, .pka, .write };
 
 /// Where a file failed.
@@ -69,7 +69,7 @@ pub const FileSummary = struct {
 
 /// Read the input structure (gzip-aware). The caller frees the result.
 pub fn readInput(allocator: Allocator, path: []const u8) ![]const u8 {
-    return zreduce.run.readFile(allocator, path);
+    return zhyd.run.readFile(allocator, path);
 }
 
 /// Predict and write the report for an already-read input. `input_path` is
@@ -85,8 +85,8 @@ pub fn processSource(
     times: *timing.StageTimes,
 ) anyerror!FileSummary {
     var sw = timing.Stopwatch.start();
-    if (zreduce.run.detectFormat(input_path) == .mmcif) {
-        var entries = zreduce.mmcif.parseModels(allocator, source, options.model_filter) catch |err| {
+    if (zhyd.run.detectFormat(input_path) == .mmcif) {
+        var entries = zhyd.mmcif.parseModels(allocator, source, options.model_filter) catch |err| {
             failure.* = .{ .stage = .parse, .err = err };
             return err;
         };
@@ -97,7 +97,7 @@ pub fn processSource(
         sw.lapInto(times, .parse);
         return predictEntries(allocator, entries.items, input_path, output_path, options, failure, times, &sw);
     } else {
-        var parsed = zreduce.pdb.parseAll(allocator, source, options.model_filter) catch |err| {
+        var parsed = zhyd.pdb.parseAll(allocator, source, options.model_filter) catch |err| {
             failure.* = .{ .stage = .parse, .err = err };
             return err;
         };
@@ -140,21 +140,21 @@ fn predictEntries(
         failure.* = .{ .stage = .no_models, .err = error.NoMatchingModels };
         return error.NoMatchingModels;
     }
-    const predictions = allocator.alloc(zreduce.pka.Prediction, entries.len) catch |err| {
+    const predictions = allocator.alloc(zhyd.pka.Prediction, entries.len) catch |err| {
         failure.* = .{ .stage = .predict, .err = err };
         return err;
     };
     defer allocator.free(predictions);
     var predicted: usize = 0;
     defer for (predictions[0..predicted]) |*prediction| prediction.deinit();
-    const reports = allocator.alloc(zreduce.writer.protonation_json.ReportModel, entries.len) catch |err| {
+    const reports = allocator.alloc(zhyd.writer.protonation_json.ReportModel, entries.len) catch |err| {
         failure.* = .{ .stage = .predict, .err = err };
         return err;
     };
     defer allocator.free(reports);
     var summary = FileSummary{};
     for (entries, 0..) |*entry, i| {
-        zreduce.place.applyChemistry(&entry.model);
+        zhyd.place.applyChemistry(&entry.model);
         sw.lapInto(times, .chemistry);
         predictions[i] = runEngine(allocator, options, &entry.model) catch |err| {
             failure.* = .{ .stage = .predict, .err = err };
@@ -173,18 +173,18 @@ fn predictEntries(
     return summary;
 }
 
-fn runEngine(allocator: Allocator, options: *const Options, mdl: *const zreduce.model.Model) !zreduce.pka.Prediction {
+fn runEngine(allocator: Allocator, options: *const Options, mdl: *const zhyd.model.Model) !zhyd.pka.Prediction {
     return switch (options.engine) {
-        .builtin => zreduce.pka.predict(allocator, mdl, options.prediction_config),
-        .propka => zreduce.pka_propka.predict(allocator, mdl, options.propka_options),
-        .empirical => zreduce.pka_empirical.predict(allocator, mdl, options.empirical_options),
+        .builtin => zhyd.pka.predict(allocator, mdl, options.prediction_config),
+        .propka => zhyd.pka_propka.predict(allocator, mdl, options.propka_options),
+        .empirical => zhyd.pka_empirical.predict(allocator, mdl, options.empirical_options),
     };
 }
 
 fn writeReport(
     output_path: ?[]const u8,
     input_path: []const u8,
-    reports: []const zreduce.writer.protonation_json.ReportModel,
+    reports: []const zhyd.writer.protonation_json.ReportModel,
 ) !void {
     const io = defaultIo();
     var buffer: [4096]u8 = undefined;
@@ -192,12 +192,12 @@ fn writeReport(
         const file = try std.Io.Dir.cwd().createFile(io, path, .{});
         defer file.close(io);
         var fw = file.writer(io, &buffer);
-        try zreduce.writer.protonation_json.writePredictionReport(&fw.interface, input_path, reports);
+        try zhyd.writer.protonation_json.writePredictionReport(&fw.interface, input_path, reports);
         try fw.interface.flush();
     } else {
         const stdout = std.Io.File.stdout();
         var sw = stdout.writer(io, &buffer);
-        try zreduce.writer.protonation_json.writePredictionReport(&sw.interface, input_path, reports);
+        try zhyd.writer.protonation_json.writePredictionReport(&sw.interface, input_path, reports);
         try sw.interface.flush();
     }
 }

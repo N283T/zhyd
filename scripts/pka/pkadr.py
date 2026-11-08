@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build a reproducible PKAD-R evaluation table for `zreduce pka`.
+"""Build a reproducible PKAD-R evaluation table for `zhyd pka`.
 
 Subcommands (run in order):
 
     normalize  PKAD-R JSON -> canonical experimental CSV with cluster ids
     fetch      download the referenced PDB entries (mmCIF) from RCSB
-    predict    run `zreduce pka` on each entry and join predictions
+    predict    run `zhyd pka` on each entry and join predictions
 
 The PKAD-R file itself is not redistributed. Download it from the official
 site (https://compbio.clemson.edu/pkad-r/) and cite
@@ -191,13 +191,13 @@ def _site_index(report: dict) -> dict[tuple[str, int, str], dict]:
 def pka_command(
     cif: Path,
     out: Path,
-    zreduce: Path,
+    zhyd: Path,
     parameters: Path | None = None,
     engine: str | None = None,
     extra_args: list[str] | None = None,
 ) -> list[str]:
-    """The `zreduce pka` command that writes the model-1 report of `cif`."""
-    command = [str(zreduce), "pka", str(cif), "--model", "1", "-o", str(out)]
+    """The `zhyd pka` command that writes the model-1 report of `cif`."""
+    command = [str(zhyd), "pka", str(cif), "--model", "1", "-o", str(out)]
     if parameters is not None:
         command += ["--parameters", str(parameters)]
     if engine is not None:
@@ -234,7 +234,7 @@ def joined_row(row: dict[str, str], site: dict) -> dict[str, str]:
 def predict(
     rows: list[dict[str, str]],
     structures: Path,
-    zreduce: Path,
+    zhyd: Path,
     out_dir: Path,
     parameters: Path | None = None,
     engine: str | None = None,
@@ -252,7 +252,7 @@ def predict(
             if not cif.exists():
                 reports[pdb] = None
             else:
-                command = pka_command(cif, out, zreduce, parameters, engine, extra_args)
+                command = pka_command(cif, out, zhyd, parameters, engine, extra_args)
                 subprocess.run(command, check=True, stderr=subprocess.DEVNULL)
                 reports[pdb] = json.loads(out.read_text())
         report = reports[pdb]
@@ -297,16 +297,16 @@ def main() -> None:
     p = sub.add_parser("predict")
     p.add_argument("canonical_csv", type=Path)
     p.add_argument("--structures", type=Path, required=True)
-    p.add_argument("--zreduce", type=Path, default=Path("zig-out/bin/zreduce"))
+    p.add_argument("--zhyd", type=Path, default=Path("zig-out/bin/zhyd"))
     p.add_argument("--reports", type=Path, required=True)
-    p.add_argument("--parameters", type=Path, help="zreduce pka parameter JSON")
-    p.add_argument("--engine", help="zreduce pka engine (builtin, empirical, propka)")
+    p.add_argument("--parameters", type=Path, help="zhyd pka parameter JSON")
+    p.add_argument("--engine", help="zhyd pka engine (builtin, empirical, propka)")
     p.add_argument(
         "--extra-arg",
         action="append",
         default=[],
         metavar="ARG",
-        help="extra argument appended to the zreduce pka command (repeatable)",
+        help="extra argument appended to the zhyd pka command (repeatable)",
     )
     p.add_argument("-o", "--output", type=Path, required=True)
 
@@ -327,7 +327,7 @@ def main() -> None:
         joined, status = predict(
             _read_csv(args.canonical_csv),
             args.structures,
-            args.zreduce,
+            args.zhyd,
             args.reports,
             args.parameters,
             args.engine,

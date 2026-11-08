@@ -7,7 +7,7 @@ corrections Q1–Q8 implemented, measured and adopted (see
 `zhyd-empirical-v1.2` (see [Recalibration on merged data](#recalibration-on-merged-data-r6);
 v1.1 in [Recalibration](#recalibration-r4)). Target: an
 MIT-licensed protein pKa engine in
-zreduce that first reproduces the PROPKA 3 empirical model ("parity mode") and
+zhyd that first reproduces the PROPKA 3 empirical model ("parity mode") and
 then improves on it ("zhyd mode").
 
 This document describes *what* the model computes: equations, conditions and
@@ -35,8 +35,8 @@ output only (see [Clean-room protocol](#clean-room-protocol)).
 1. The spec author has read PROPKA 3.5.1 and written zpropka (LGPL-2.1).
    Implementers of this engine **must not** open the PROPKA or zpropka
    sources. They get this document, the papers and the oracle's output.
-2. The oracle is used only as a black box: `zreduce pka --engine propka`
-   (zreduce built with `-Dpropka=true`) and its JSON report.
+2. The oracle is used only as a black box: `zhyd pka --engine propka`
+   (zhyd built with `-Dpropka=true`) and its JSON report.
 3. When the engine disagrees with the oracle, the implementer reports the
    site, the terms that differ and the input. The spec author amends this
    document *in words* (new rule, corrected constant, clarified condition),
@@ -121,13 +121,13 @@ reorganisation; `hydrogen_bond` = side-chain + backbone H-bond determinants;
 
 - Heavy atoms only from the input; existing hydrogens are discarded.
 - Residues named HOH, H2O, SO4, PO4, PEG, EPE, TRS are removed before
-  anything else (parity), together with every residue zreduce classifies as
+  anything else (parity), together with every residue zhyd classifies as
   water (the parity input, see below). zhyd mode therefore has no further
   water rule to apply (Q6).
 - **Disulfide:** two CYS SG atoms closer than 2.5 Å. Both CYS are not
   titratable and take no part in pair interactions (they still count as
   atoms for desolvation of others). Their reported value is "not titrating";
-  zreduce lists them in `excluded_sites`.
+  zhyd lists them in `excluded_sites`.
 - **N-terminus (parity):** the N atom of the first ATOM-record residue of each
   chain (after a chain start, model start or TER). Chain breaks inside a chain
   do not create an N-terminus. HETATM residues never form one.
@@ -138,9 +138,9 @@ reorganisation; `hydrogen_bond` = side-chain + backbone H-bond determinants;
   bond graph. Bond graphs are used for (a) the 4-bond exclusion of side-chain
   H-bonds, (b) placing internal hydrogens, (c) carboxyl and backbone C=O
   atoms (see [Group geometry](#group-geometry)) and (d) covalent coupling.
-- **Parity input (r2):** what zreduce's glue passes to the oracle: heavy
+- **Parity input (r2):** what zhyd's glue passes to the oracle: heavy
   atoms only, coordinates rounded to 3 decimals, only standard polymer
-  residues as ATOM records, zreduce waters dropped, chains identified by the
+  residues as ATOM records, zhyd waters dropped, chains identified by the
   auth chain id.
 - **N-terminus details (r2):** chain-start detection also restarts after a
   residue carrying OXT. Every residue sharing the residue number of the
@@ -175,7 +175,7 @@ Refinements (r2), each inferred from oracle reports:
 ## Internal hydrogens
 
 The engine adds its own hydrogens for the energy terms only; they are never
-written out and are independent of zreduce's placement and bond-length
+written out and are independent of zhyd's placement and bond-length
 policy. Hydrogens are needed on:
 
 | Atom | Count | Geometry |
@@ -495,8 +495,8 @@ These are reproduced in parity mode and corrected in zhyd mode:
 | Q1 | Same-residue exclusion ignores insertion code | compare full residue identity |
 | Q2 | Negative angle cosine counts as a positive H-bond | F_angle = max(0, cos) |
 | Q3 | No C-terminus without OXT | chain-last polymer residue is a C-terminus |
-| Q4 | N-terminus only after TER / chain start; chain breaks ignored | follows zreduce chain-break detection (`--nterm` policy) |
-| Q5 | Ions by residue name only | monatomic metal ions by element; coordination-aware exclusion (already in zreduce) |
+| Q4 | N-terminus only after TER / chain start; chain breaks ignored | follows zhyd chain-break detection (`--nterm` policy) |
+| Q5 | Ions by residue name only | monatomic metal ions by element; coordination-aware exclusion (already in zhyd) |
 | Q6 | Crystal waters count as burial atoms (if not removed) | waters removed (already part of the parity input; no further effect) |
 | Q7 | Averaging 99.99 for conformations where a site does not titrate yields values like 52.96 | average over titrating conformations only; values outside the physical range flagged `pka_outside_physical_range` |
 | Q8 | Insertion-code artefacts of [Conformations](#conformations): matching ignores the insertion code, only the last residue of a (chain, number) family exists after the first conformation, an absent conformation counts as 0, and N-termini extend to the whole family | full residue identity everywhere; every residue present in every conformation; mean over the conformations in which the site exists |
@@ -518,8 +518,8 @@ mentioned here are unchanged from parity mode.
   unchanged.
 - **Q3 (C-terminus without OXT).** The C-termini are the residues with an
   OXT (as in parity) and, in addition, the last polymer residue of each
-  zreduce chain (label chain) when it is an amino acid without OXT whose
-  CA, C and O are present and whose C–O is bonded. With the zreduce
+  zhyd chain (label chain) when it is an amino acid without OXT whose
+  CA, C and O are present and whose C–O is bonded. With the zhyd
   `--nterm aggressive` policy the residue before a chain break is a
   C-terminus too. The missing oxygen is modelled at 1.25 Å from C along
   −(û_CA + û_O), where û_CA and û_O are unit vectors from C to CA and to O
@@ -528,9 +528,9 @@ mentioned here are unchanged from parity mode.
   interaction atom (acid and base list: O and the modelled oxygen) and part
   of the centre (their mean). It is not a burial atom of any group. The
   residue's C forms no backbone C=O group.
-- **Q4 (N-termini).** The N-termini are the first residue of each zreduce
+- **Q4 (N-termini).** The N-termini are the first residue of each zhyd
   chain, when it is an amino acid with an N atom, and, under `--nterm
-  aggressive`, every residue zreduce marks with a chain break before it
+  aggressive`, every residue zhyd marks with a chain break before it
   (`_pdbx_poly_seq_scheme` gaps, or residue-number gaps in PDB input). The
   parity rules (restart after TER, auth chain change or OXT; insertion-code
   family) are not used. A chain starting with a cap (ACE, FME, PCA, …) has
@@ -542,7 +542,7 @@ mentioned here are unchanged from parity mode.
   +2; Fe +3; F, Cl, Br, I −1). Multi-atom residues (clusters, cofactors) are
   never ions. Metal-coordinated sites are excluded as in parity mode.
 - **Q6 (waters).** No effect: the parity input already drops HOH, H2O and
-  every residue zreduce classifies as water. The switch exists so that the
+  every residue zhyd classifies as water. The switch exists so that the
   table stays complete.
 - **Q7 (non-titrating conformations).** A site's reported pKa and terms are
   the mean over the conformations in which it titrates. Conformations where
@@ -744,7 +744,7 @@ pair terms.
   values replace the table value (range −5..20); a desolvation scale
   multiplies that kind's desolvation shift (range 0..10, default 1.0).
   Unknown keys are an error. Overrides apply on top of the mode's table.
-- CLI: `zreduce pka --engine empirical [--empirical-mode parity|zhyd]
+- CLI: `zhyd pka --engine empirical [--empirical-mode parity|zhyd]
   [--empirical-fixes Q1,..|none] [--parameters PATH]` (default zhyd; the
   mode and fix options are rejected for other engines, `--parameters` in
   parity mode). Having met G2, zhyd mode replaced `builtin` (v0.2) as the
@@ -761,7 +761,7 @@ Gates, in order:
 
 1. **Unit tests** per section, with expectations computed by hand from this
    document (single atoms, two-group fixtures, a three-group iterative case).
-2. **Parity (G1):** on the 185-structure PKAD-R set and the zreduce test
+2. **Parity (G1):** on the 185-structure PKAD-R set and the zhyd test
    structures, parity mode vs `--engine propka` (waters dropped, which matches
    the parity water rule) on the same input file: |Δ predicted| ≤ 0.02 for ≥ 99 % of sites, ≤ 0.1 for all
    sites, and the same set of reported sites. Every exceedance is either
@@ -783,7 +783,7 @@ Parity mode against the oracle (`compare_engines.py`, same input file):
 | PKAD-R, protein only (non-ion HETATM and nucleotides stripped) | 162 | 19,598 | 99.84 % | 19 | 0.825 | yes |
 | same without 4HHB | 161 | 19,424 | 99.98 % | 2 | 0.177 | yes |
 | PKAD-R as deposited (ligands present) | 162 | 19,502 | 95.01 % | 813 | 6.66 | yes |
-| zreduce test/example structures, protein only | 8 | 1,188 | 98.74 % | 5 | 0.84 | yes |
+| zhyd test/example structures, protein only | 8 | 1,188 | 98.74 % | 5 | 0.84 | yes |
 
 The model term matches on every site. The "≤ 0.1 for all sites" bound fails
 on 19 sites (17 in 4HHB); G1 is accepted with these recorded as deviations,

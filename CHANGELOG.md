@@ -1,18 +1,25 @@
 # Changelog
 
-All notable changes to zreduce will be documented in this file.
+All notable changes to zhyd will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Renamed from zreduce to zhyd** (repository, executable, Zig module and
+  package). The scope now covers protonation states and pKa, not only
+  reduce-style hydrogen placement. No `zreduce` alias is kept. The mmCIF
+  output's log category is now `_zhyd_log` (was `_zreduce_log`) and its
+  data block `data_ZHYD`; `scripts/pka` options `--zreduce` are now `--zhyd`
+
 ### Added
 - `evaluate.py` reports error by experimental-shift bin, a fixed reference
   null model, protonation-state accuracy at pH 7 and how many state flips
   (sites whose state differs from the reference pKa) are predicted
 - `CITATION.cff` and `THIRD_PARTY_NOTICES.md`
-- `zreduce pka <dir>` batch mode: one `<stem>.json` per structure file,
+- `zhyd pka <dir>` batch mode: one `<stem>.json` per structure file,
   byte-identical to single-file runs, in parallel (`-j N`; PROPKA engine on one
   thread), with a per-file `--jsonl` log; failed files do not stop the batch
 - `--timing` for `run`, `batch` and `pka`: per-stage timing breakdown (read,
@@ -27,11 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `scripts/pka/external_set.py` builds an external pKa test set from PKAD-3_V2
   and the KaML time-stamped set with no PKAD-R structure or 30 % sequence
   homolog; results for all engines are in the empirical-engine spec
-- `zreduce pka` without PROPKA now defaults to the empirical engine in zhyd
+- `zhyd pka` without PROPKA now defaults to the empirical engine in zhyd
   mode (`zhyd-empirical-v1.2`); `--engine builtin` keeps the v0.2 model,
   which `--model-only` selects implicitly
 - Experimental, independently implemented staged protein pKa predictor for
-  ASP/GLU/HIS/LYS/CYS/TYR and peptide termini (`zreduce pka`), with explicit
+  ASP/GLU/HIS/LYS/CYS/TYR and peptide termini (`zhyd pka`), with explicit
   model, burial, hydrogen-bond, electrostatic, and mean-field coupling terms
 - Versioned `zhyd.protonation.v1` JSON schema and `run --state-json` sidecar for
   applied residue states, formal charges, and provenance
@@ -44,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     (`scripts/pka/params/`); `pka --parameters PATH` loads a custom set
   - PKAD-R normalization, structure fetch, prediction join, and calibration
     scripts (`scripts/pka/pkadr.py`, `scripts/pka/calibrate.py`)
-- Optional PROPKA 3.5.1 engine for `zreduce pka` via the LGPL-2.1 zpropka
+- Optional PROPKA 3.5.1 engine for `zhyd pka` via the LGPL-2.1 zpropka
   package (`zig build -Dpropka=true`, `--engine propka|builtin`,
   `--propka-keep-waters`); output matches `propka3` on 185 PKAD-R structures
   (14,291 sites, max |Δ| 0.005 = PROPKA's print rounding). The report records
@@ -59,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   protein model from a written description (clean-room protocol, parity
   quirks, acceptance gates): `docs/specs/zhyd-pka-empirical-engine.md`;
   `scripts/pka/compare_engines.py` compares two zhyd pKa reports site by site
-- Experimental MIT empirical pKa engine, parity mode (`zreduce pka --engine
+- Experimental MIT empirical pKa engine, parity mode (`zhyd pka --engine
   empirical`, `src/pka_empirical/`), implemented from that specification
   with PROPKA used only as a black-box oracle; 99.84 % of 19,598 protein
   sites on 185 PKAD-R structures within 0.02 of PROPKA (spec r2 records the
@@ -71,13 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   desolvation scale, fitted on the PKAD-R train split with
   leave-one-cluster-out CV; test MAE 1.170 → 0.712). Parity remains the
   default and its output is unchanged
-- `zreduce pka --engine empirical --empirical-mode zhyd --parameters PATH`:
+- `zhyd pka --engine empirical --empirical-mode zhyd --parameters PATH`:
   per-site model pKa and desolvation scale overrides (JSON with its own
   version; unknown keys rejected)
 - `scripts/pka/calibrate_empirical.py`: grid fit with leave-one-cluster-out
   CV for one site kind of the empirical engine
 - `pkadr.py predict --extra-arg ARG` (repeatable) passes extra options to
-  `zreduce pka`
+  `zhyd pka`
 - SDF/MOL V2000 parser (`src/sdf.zig`) for providing ligand topology for compounds not in the CCD (#257)
   - `-s, --sdf PATH` flag on `run` and `batch` subcommands
   - Multiple molecules per file (separated by `$$$$`), molecule name used as comp_id
@@ -94,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - `aggressive`: NH3+/NH2+ on both chain-first and chain-break residues (matches reduce2 `first_in_chain`)
   - `neutral`: non-PRO real N-termini get a neutral NH2 (H2/H3 at gauche ±60°, no positive charge flag). PRO is an exception: it keeps the NH2+ geometry and positive charge flag because its secondary amine is protonated at physiological pH.
 - `placeNtermNH2Neutral` in `src/place/terminal.zig` for neutral primary amine placement
-- `NtermMode` enum re-exported from `zreduce.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
+- `NtermMode` enum re-exported from `zhyd.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
 - `batch --jsonl` kept only the last few lines: each line was written at file

@@ -1,4 +1,4 @@
-//! mmCIF writer: outputs model atoms plus a custom _zreduce_log category.
+//! mmCIF writer: outputs model atoms plus a custom _zhyd_log category.
 
 const std = @import("std");
 const model_mod = @import("../model.zig");
@@ -259,7 +259,7 @@ pub fn writeWithDocumentWithPolicy(writer: anytype, model: *const Model, doc: ?*
     }
 
     // Fallback: atom-site-only mode
-    try writer.writeAll("data_ZREDUCE\n#\n");
+    try writer.writeAll("data_ZHYD\n#\n");
     try writeAtomSite(writer, model, bond_policy.output_isotope);
     try writer.writeAll("#\n");
 }
@@ -327,7 +327,7 @@ pub fn writeMultiModelWithDocumentWithPolicy(
     }
 
     // Fallback: atom-site-only mode
-    try writer.writeAll("data_ZREDUCE\n#\n");
+    try writer.writeAll("data_ZHYD\n#\n");
     for (entries) |entry| {
         try writeAtomSite(writer, &entry.model, bond_policy.output_isotope);
     }
@@ -726,7 +726,7 @@ fn writePaddedFloat2(writer: anytype, val: f32, min_width: usize) !void {
 // ── Optimization log ──────────────────────────────────────────────────────────
 
 /// Write optimization log as a custom mmCIF category.
-pub fn writeZreduceLog(
+pub fn writeZhydLog(
     writer: anytype,
     movers: []const mover_mod.Mover,
     residues: []const Residue,
@@ -734,10 +734,10 @@ pub fn writeZreduceLog(
 ) !void {
     try writer.writeAll(
         \\loop_
-        \\_zreduce_log.residue_id
-        \\_zreduce_log.action
-        \\_zreduce_log.orientation
-        \\_zreduce_log.score
+        \\_zhyd_log.residue_id
+        \\_zhyd_log.action
+        \\_zhyd_log.orientation
+        \\_zhyd_log.score
         \\
     );
     for (movers) |m| {
@@ -1081,7 +1081,7 @@ test "writeWithDocument preserves bare null alt ids on original rows" {
     try testing.expect(std.mem.find(u8, buf.writer.buffered(), "'.'") == null);
 }
 
-test "writeZreduceLog produces expected output" {
+test "writeZhydLog produces expected output" {
     const allocator = testing.allocator;
 
     var chains = [_]Chain{blk: {
@@ -1122,10 +1122,10 @@ test "writeZreduceLog produces expected output" {
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
 
-    try writeZreduceLog(&buf.writer, &movers, &residues, &chains);
+    try writeZhydLog(&buf.writer, &movers, &residues, &chains);
 
     const output = buf.writer.buffered();
-    try testing.expect(std.mem.find(u8, output, "_zreduce_log.residue_id") != null);
+    try testing.expect(std.mem.find(u8, output, "_zhyd_log.residue_id") != null);
     try testing.expect(std.mem.find(u8, output, "flip_amide") != null);
     try testing.expect(std.mem.find(u8, output, "A.ASN.5") != null);
 }

@@ -193,7 +193,7 @@ fn isAminoAcidName(comp: []const u8) bool {
     return topology.getBonds(comp) != null or std.mem.eql(u8, comp, "UNK");
 }
 
-/// Residues dropped before anything else: zreduce waters plus the parity list.
+/// Residues dropped before anything else: zhyd waters plus the parity list.
 pub fn isRemoved(res: model_mod.Residue) bool {
     if (res.entity_type == .water) return true;
     const comp = res.compIdSlice();
@@ -623,7 +623,7 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
 
     var b = Builder{ .allocator = allocator, .mdl = mdl, .params = params, .conf = &conf, .ranges = ranges, .chain_keys = chain_keys };
 
-    // zreduce termini (Q3, Q4): the first residue of each zreduce chain is
+    // zhyd termini (Q3, Q4): the first residue of each zhyd chain is
     // an N-terminus, the last polymer residue a C-terminus; with
     // `break_termini` (--nterm aggressive) also the residues after / before
     // a chain break.
@@ -746,7 +746,7 @@ pub fn build(allocator: std.mem.Allocator, mdl: *const Model, altloc: ?u8, first
 
 const Termini = struct { n: bool = false, c: bool = false };
 
-/// zreduce termini: first residue of each chain and last polymer residue;
+/// zhyd termini: first residue of each chain and last polymer residue;
 /// with `breaks`, also around `is_chain_break_before` (the same rule as the
 /// hydrogen placer under --nterm aggressive).
 fn markTermini(mdl: *const Model, out: []Termini, breaks: bool) void {
@@ -1113,7 +1113,7 @@ test "Q3: chain-last residue without OXT is a C-terminus with a modelled oxygen"
     try testing.expect(!conf.withinBonds(g.group_atom, ca, 1));
 }
 
-test "Q4: N-termini follow zreduce chains and chain breaks" {
+test "Q4: N-termini follow zhyd chains and chain breaks" {
     const ace = [_]AtomSpec{.{ .name = "C", .element = .C, .x = -20 }};
     const a1 = backboneAtoms(0);
     const a2 = backboneAtoms(20);
@@ -1192,7 +1192,7 @@ test "Q5: monatomic metal ions by element" {
     }
 }
 
-test "Q6: zreduce waters are removed in every mode" {
+test "Q6: zhyd waters are removed in every mode" {
     const ala = backboneAtoms(0);
     const wat = [_]AtomSpec{.{ .name = "O", .element = .O, .x = 3 }};
     var mdl = try specModel(&.{

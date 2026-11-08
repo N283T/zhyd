@@ -2,7 +2,7 @@
 """Recalibrate one site kind of the empirical engine (zhyd mode), train split only.
 
 Grid search over the kind's model pKa and desolvation scale factor, passed to
-`zreduce pka --engine empirical --empirical-mode zhyd --parameters`. Every
+`zhyd pka --engine empirical --empirical-mode zhyd --parameters`. Every
 grid point is evaluated on the whole training split (structures that do not
 contain the residue are run once and reused), and the per-row predictions are
 cached, so the full fit and the leave-one-cluster-out cross-validation are
@@ -219,7 +219,7 @@ def evaluate_grid(
     points: list[Point],
     fixed: dict,
     structures: Path,
-    zreduce: Path,
+    zhyd: Path,
     work: Path,
     jobs: int,
 ) -> dict[Point, list[float | None]]:
@@ -245,7 +245,7 @@ def evaluate_grid(
             command = pkadr.pka_command(
                 structures / f"{pdb}.cif",
                 out,
-                zreduce,
+                zhyd,
                 param_path,
                 "empirical",
                 ZHYD_ARGS,
@@ -284,7 +284,7 @@ def main() -> None:
     )
     parser.add_argument("canonical_csv", type=Path)
     parser.add_argument("--structures", type=Path, required=True)
-    parser.add_argument("--zreduce", type=Path, default=Path("zig-out/bin/zreduce"))
+    parser.add_argument("--zhyd", type=Path, default=Path("zig-out/bin/zhyd"))
     parser.add_argument("--kind", required=True, choices=sorted(DEFAULT_MODEL_PKA))
     parser.add_argument("--seed", default="zhyd-pka-split-v1")
     parser.add_argument("--train-fraction", type=float, default=0.8)
@@ -339,7 +339,7 @@ def main() -> None:
                 points,
                 fixed,
                 args.structures,
-                args.zreduce,
+                args.zhyd,
                 Path(tmp),
                 args.jobs,
             )

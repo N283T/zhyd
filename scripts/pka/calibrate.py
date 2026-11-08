@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fit `zreduce pka` parameters on the training split only.
+"""Fit `zhyd pka` parameters on the training split only.
 
 Coordinate descent over a small, physically bounded parameter grid, minimizing
 training-split MAE against experimental pKa values. Test and stress (holdout
@@ -46,14 +46,14 @@ def objective(
     rows: list[dict],
     params: dict,
     structures: Path,
-    zreduce: Path,
+    zhyd: Path,
     work: Path,
     kind: str = "mae",
 ) -> float:
     param_path = work / "params.json"
     param_path.write_text(json.dumps(params))
     joined, _ = pkadr.predict(
-        rows, structures, zreduce, work / "reports", param_path, engine="builtin"
+        rows, structures, zhyd, work / "reports", param_path, engine="builtin"
     )
     errors = [float(r["predicted_pka"]) - float(r["experimental_pka"]) for r in joined]
     if kind == "rmse":
@@ -67,7 +67,7 @@ def main() -> None:
     )
     parser.add_argument("canonical_csv", type=Path)
     parser.add_argument("--structures", type=Path, required=True)
-    parser.add_argument("--zreduce", type=Path, default=Path("zig-out/bin/zreduce"))
+    parser.add_argument("--zhyd", type=Path, default=Path("zig-out/bin/zhyd"))
     parser.add_argument("--version", required=True, help="label for the fitted set")
     parser.add_argument("--seed", default="zhyd-pka-split-v1")
     parser.add_argument("--train-fraction", type=float, default=0.8)
@@ -87,7 +87,7 @@ def main() -> None:
             run_dir = work / str(next(counter))
             run_dir.mkdir()
             return objective(
-                rows, candidate, args.structures, args.zreduce, run_dir, args.objective
+                rows, candidate, args.structures, args.zhyd, run_dir, args.objective
             )
 
         best = score(params)
