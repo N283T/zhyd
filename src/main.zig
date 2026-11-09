@@ -861,10 +861,11 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
     };
 
     if (result.n_movers > 0) {
-        std.debug.print("  Movers: {d} ({d} singletons, {d} brute-force, {d} greedy)\n", .{
+        std.debug.print("  Movers: {d} ({d} singletons, {d} brute-force, {d} elimination, {d} greedy)\n", .{
             result.n_movers,
             result.n_singletons,
             result.n_brute_force,
+            result.n_elimination,
             result.n_vertex_cut,
         });
     }

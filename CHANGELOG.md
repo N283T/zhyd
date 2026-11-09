@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Cliques beyond the brute-force limit are solved exactly by variable
+  elimination over their score tables instead of iterative greedy search,
+  which stays only as a fallback when an elimination table would exceed
+  4,000,000 entries. All 19 such cliques in the 100-structure set are now
+  solved exactly. The run summary reports an "elimination" count
 - **Atom-pair scores are reduce's dot score, integrated in closed form**
   (`scorer.pairDotScore`). The old pair score judged the whole pair by its
   center distance: an H-bond whose center overlap passed the 0.6 A allowance
