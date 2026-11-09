@@ -220,7 +220,7 @@ pub fn moverTargetName(mdl: *const Model, m: *const Mover) []const u8 {
     return switch (m.kind) {
         .amide_flip => "amide",
         .his_flip => "his",
-        .single_h_rotator, .nh3_rotator, .nh2_rotator, .methyl_rotator, .aromatic_methyl => blk: {
+        .single_h_rotator, .nh3_rotator, .nh2_rotator => blk: {
             const center_idx = m.center_idx orelse break :blk "unknown";
             break :blk mdl.atoms.items[center_idx].nameSlice();
         },
@@ -387,7 +387,7 @@ test "apply fix locks amide and rotator movers" {
         }
 
         var overrides = try parseString(testing.allocator,
-            \\A:1 ALA CB 2
+            \\A:1 ALA N 2
         );
         defer overrides.deinit();
         try applyFixes(&overrides, &mdl, movers);
@@ -434,7 +434,7 @@ test "applyFixes rejects out-of-range orientation" {
     }
 
     var overrides = try parseString(testing.allocator,
-        \\A:1 ALA CB 999
+        \\A:1 ALA N 999
     );
     defer overrides.deinit();
     try testing.expectError(error.InvalidFixOverride, applyFixes(&overrides, &mdl, movers));

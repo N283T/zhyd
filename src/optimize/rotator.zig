@@ -1,4 +1,4 @@
-//! Rotator movers: OH/SH (single H), NH3+, and methyl (CH3) rotators.
+//! Rotator movers: OH/SH (single H), NH3+ and NH2 rotators.
 //! Each creates a Mover with discrete orientations by rotating hydrogens
 //! around a bond axis.
 
@@ -64,11 +64,16 @@ pub fn createSingleHRotator(
     };
 }
 
+/// Coarse NH3+ rotation offsets in degrees; see `createNH3Rotator`.
+const nh3_angle_offsets = [4]f32{ 0.0, 30.0, 60.0, 90.0 };
+
 /// Create an NH3+ rotator mover.
 /// h_indices: indices of the 3 hydrogen atoms
 /// center_idx: the N atom index
 /// axis_idx: the atom defining rotation axis (CA usually)
-/// Produces 3 orientations at 0°, 60°, -60° offsets.
+/// NH3+ is 3-fold symmetric, so rotations repeat every 120°. Produces 4
+/// orientations at 0°, 30°, 60° and 90° offsets, the distinct positions of a
+/// 30° grid. (An earlier 0°/+60°/-60° set had two identical orientations.)
 /// Non-default orientations have a small penalty of 0.05.
 pub fn createNH3Rotator(
     allocator: std.mem.Allocator,
@@ -78,15 +83,15 @@ pub fn createNH3Rotator(
     axis_idx: u32,
     residue_idx: u32,
 ) !Mover {
-    const n_orientations = 3;
+    const n_orientations = nh3_angle_offsets.len;
     const n_atoms_per = 3;
 
     const center = atoms[center_idx].pos;
     const axis_atom = atoms[axis_idx].pos;
     const axis_dir = center.sub(axis_atom);
 
-    const angle_offsets = [3]f32{ 0.0, 60.0, -60.0 };
-    const penalties = [3]f32{ 0.0, 0.05, 0.05 };
+    const angle_offsets = nh3_angle_offsets;
+    const penalties = [nh3_angle_offsets.len]f32{ 0.0, 0.05, 0.05, 0.05 };
 
     // Allocate one contiguous block for all orientation positions.
     const all_positions = try allocator.alloc(Vec3(f32), n_orientations * n_atoms_per);
@@ -181,62 +186,6 @@ pub fn createNH2Rotator(
     };
 }
 
-/// Create a methyl rotator mover (CH3).
-/// h_indices: indices of the 3 hydrogen atoms
-/// center_idx: the C atom index
-/// axis_idx: the atom defining rotation axis
-/// Produces 3 orientations at 0°, 60°, -60° offsets. No penalty.
-pub fn createMethylRotator(
-    allocator: std.mem.Allocator,
-    atoms: []const Atom,
-    h_indices: [3]u32,
-    center_idx: u32,
-    axis_idx: u32,
-    residue_idx: u32,
-) !Mover {
-    const n_orientations = 3;
-    const n_atoms_per = 3;
-
-    const center = atoms[center_idx].pos;
-    const axis_atom = atoms[axis_idx].pos;
-    const axis_dir = center.sub(axis_atom);
-
-    const angle_offsets = [3]f32{ 0.0, 60.0, -60.0 };
-
-    // Allocate one contiguous block for all orientation positions.
-    const all_positions = try allocator.alloc(Vec3(f32), n_orientations * n_atoms_per);
-    errdefer allocator.free(all_positions);
-
-    const orientations = try allocator.alloc(Orientation, n_orientations);
-    errdefer allocator.free(orientations);
-
-    for (0..n_orientations) |i| {
-        const slice = all_positions[i * n_atoms_per .. (i + 1) * n_atoms_per];
-        for (0..n_atoms_per) |j| {
-            const h_pos = atoms[h_indices[j]].pos;
-            slice[j] = math_mod.rotateAroundAxis(f32, h_pos, center, axis_dir, angle_offsets[i]);
-        }
-        orientations[i] = .{ .positions = slice, .penalty = 0.0 };
-    }
-
-    const atom_indices = try allocator.alloc(u32, 3);
-    errdefer allocator.free(atom_indices);
-    for (0..3) |i| {
-        atom_indices[i] = h_indices[i];
-    }
-
-    return Mover{
-        .kind = .methyl_rotator,
-        .residue_idx = residue_idx,
-        .atom_indices = atom_indices,
-        .orientations = orientations,
-        .allocator = allocator,
-        .center_idx = center_idx,
-        .axis_idx = axis_idx,
-        .positions_backing = all_positions,
-    };
-}
-
 /// Generate fine angular orientations around a coarse best orientation.
 /// Returns empty slice if mover has no center_idx/axis_idx (non-rotator).
 pub fn generateFineOrientations(
@@ -254,22 +203,14 @@ pub fn generateFineOrientations(
     // Determine base angle from coarse_best_idx
     const base_angle: f32 = switch (m.kind) {
         .single_h_rotator, .nh2_rotator => @as(f32, @floatFromInt(coarse_best_idx)) * 30.0,
-        .nh3_rotator, .methyl_rotator, .aromatic_methyl => blk: {
-            const offsets = [3]f32{ 0.0, 60.0, -60.0 };
-            break :blk offsets[coarse_best_idx];
-        },
+        .nh3_rotator => nh3_angle_offsets[coarse_best_idx],
         else => return try allocator.alloc(Orientation, 0),
     };
 
-    // Fine search parameters depend on kind
-    const half_range: f32 = switch (m.kind) {
-        .single_h_rotator, .nh2_rotator => 15.0,
-        else => 30.0,
-    };
-    const step: f32 = switch (m.kind) {
-        .single_h_rotator, .nh2_rotator => 5.0,
-        else => 10.0,
-    };
+    // All rotators use a 30° coarse grid, so +-15° in 5° steps covers the gap
+    // between neighbouring coarse orientations.
+    const half_range: f32 = 15.0;
+    const step: f32 = 5.0;
 
     // Collect fine offsets, skipping 0 (the coarse position)
     var offsets_buf: [12]f32 = undefined;
@@ -346,7 +287,7 @@ test "single H rotator has no penalties" {
     }
 }
 
-test "NH3 rotator has 3 orientations with 3 atoms each" {
+test "NH3 rotator has 4 orientations with 3 atoms each" {
     const allocator = testing.allocator;
 
     // N at origin, CA at (-1,0,0), 3 H atoms placed around N
@@ -361,10 +302,40 @@ test "NH3 rotator has 3 orientations with 3 atoms each" {
     var mover = try createNH3Rotator(allocator, &atoms, .{ 0, 1, 2 }, 3, 4, 0);
     defer mover.deinit();
 
-    try testing.expectEqual(@as(usize, 3), mover.orientations.len);
-    try testing.expectEqual(@as(usize, 3), mover.orientations[0].positions.len);
-    try testing.expectEqual(@as(usize, 3), mover.orientations[1].positions.len);
-    try testing.expectEqual(@as(usize, 3), mover.orientations[2].positions.len);
+    try testing.expectEqual(@as(usize, 4), mover.orientations.len);
+    for (mover.orientations) |o| try testing.expectEqual(@as(usize, 3), o.positions.len);
+}
+
+test "NH3 rotator orientations are distinct under 3-fold symmetry" {
+    const allocator = testing.allocator;
+
+    // Axis along x, H in the yz plane at 120° spacing.
+    const atoms = [_]Atom{
+        .{ .pos = .{ .x = 0.0, .y = 1.0, .z = 0.0 } },
+        .{ .pos = .{ .x = 0.0, .y = -0.5, .z = 0.866 } },
+        .{ .pos = .{ .x = 0.0, .y = -0.5, .z = -0.866 } },
+        .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } },
+        .{ .pos = .{ .x = -1.0, .y = 0.0, .z = 0.0 } },
+    };
+
+    var mover = try createNH3Rotator(allocator, &atoms, .{ 0, 1, 2 }, 3, 4, 0);
+    defer mover.deinit();
+
+    // Two orientations are the same configuration when every H of one sits on
+    // some H of the other.
+    for (mover.orientations, 0..) |oa, a| {
+        for (mover.orientations[a + 1 ..]) |ob| {
+            var all_matched = true;
+            for (oa.positions) |pa| {
+                var matched = false;
+                for (ob.positions) |pb| {
+                    if (pa.distance(pb) < 0.01) matched = true;
+                }
+                if (!matched) all_matched = false;
+            }
+            try testing.expect(!all_matched);
+        }
+    }
 }
 
 test "NH3 rotator first orientation has zero penalty, others have 0.05" {
@@ -382,45 +353,7 @@ test "NH3 rotator first orientation has zero penalty, others have 0.05" {
     defer mover.deinit();
 
     try testing.expectApproxEqAbs(@as(f32, 0.0), mover.orientations[0].penalty, 0.001);
-    try testing.expectApproxEqAbs(@as(f32, 0.05), mover.orientations[1].penalty, 0.001);
-    try testing.expectApproxEqAbs(@as(f32, 0.05), mover.orientations[2].penalty, 0.001);
-}
-
-test "methyl rotator has 3 orientations" {
-    const allocator = testing.allocator;
-
-    const atoms = [_]Atom{
-        .{ .pos = .{ .x = 0.0, .y = 1.0, .z = 0.0 } },
-        .{ .pos = .{ .x = 0.866, .y = -0.5, .z = 0.0 } },
-        .{ .pos = .{ .x = -0.866, .y = -0.5, .z = 0.0 } },
-        .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } }, // C at index 3
-        .{ .pos = .{ .x = -1.0, .y = 0.0, .z = 0.0 } }, // axis atom at index 4
-    };
-
-    var mover = try createMethylRotator(allocator, &atoms, .{ 0, 1, 2 }, 3, 4, 0);
-    defer mover.deinit();
-
-    try testing.expectEqual(@as(usize, 3), mover.orientations.len);
-    try testing.expectEqual(@as(usize, 3), mover.atom_indices.len);
-}
-
-test "methyl rotator has no penalties" {
-    const allocator = testing.allocator;
-
-    const atoms = [_]Atom{
-        .{ .pos = .{ .x = 0.0, .y = 1.0, .z = 0.0 } },
-        .{ .pos = .{ .x = 0.866, .y = -0.5, .z = 0.0 } },
-        .{ .pos = .{ .x = -0.866, .y = -0.5, .z = 0.0 } },
-        .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } },
-        .{ .pos = .{ .x = -1.0, .y = 0.0, .z = 0.0 } },
-    };
-
-    var mover = try createMethylRotator(allocator, &atoms, .{ 0, 1, 2 }, 3, 4, 0);
-    defer mover.deinit();
-
-    for (mover.orientations) |o| {
-        try testing.expectApproxEqAbs(@as(f32, 0.0), o.penalty, 0.001);
-    }
+    for (mover.orientations[1..]) |o| try testing.expectApproxEqAbs(@as(f32, 0.05), o.penalty, 0.001);
 }
 
 test "rotator atom distances preserved after rotation" {
@@ -471,7 +404,7 @@ test "generateFineOrientations produces 6 fine positions for single H" {
     }
 }
 
-test "generateFineOrientations produces 6 fine positions for methyl" {
+test "generateFineOrientations produces 6 fine positions for NH3" {
     const allocator = testing.allocator;
     const atoms = [_]Atom{
         .{ .pos = .{ .x = 0.0, .y = 1.0, .z = 0.0 } },
@@ -481,7 +414,7 @@ test "generateFineOrientations produces 6 fine positions for methyl" {
         .{ .pos = .{ .x = -1.0, .y = 0.0, .z = 0.0 } },
     };
 
-    var mover = try createMethylRotator(allocator, &atoms, .{ 0, 1, 2 }, 3, 4, 0);
+    var mover = try createNH3Rotator(allocator, &atoms, .{ 0, 1, 2 }, 3, 4, 0);
     defer mover.deinit();
 
     const fine = try generateFineOrientations(allocator, &atoms, &mover, 0);

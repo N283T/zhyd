@@ -271,6 +271,10 @@ pub fn isMoverAtom(m: *const Mover, atom_idx: u32) bool {
     return false;
 }
 
+/// Atom pairs score zero once their gap exceeds this, in Angstrom. The
+/// interaction graph uses it to decide which movers can affect each other.
+pub const contact_margin: f32 = 0.5;
+
 /// Score an atom pair from two Atom structs.
 /// Returns a positive score for contacts/H-bonds and negative for bumps.
 pub fn scorePair(a: Atom, other: Atom, scoring_params: scorer_mod.ScoringParams, gap_scale: f32) f32 {
@@ -288,7 +292,7 @@ pub fn scorePair(a: Atom, other: Atom, scoring_params: scorer_mod.ScoringParams,
         return -scoring_params.bump_weight * (-0.5 * gap);
     }
 
-    const threshold = sum_r + 0.5;
+    const threshold = sum_r + contact_margin;
     if (dist2 < threshold * threshold) {
         const dist = @sqrt(dist2);
         const gap = dist - sum_r;
@@ -325,7 +329,7 @@ pub fn scorePairSoA(
         return -scoring_params.bump_weight * (-0.5 * gap);
     }
 
-    const threshold = sum_r + 0.5;
+    const threshold = sum_r + contact_margin;
     if (dist2 < threshold * threshold) {
         const dist = @sqrt(dist2);
         const gap = dist - sum_r;

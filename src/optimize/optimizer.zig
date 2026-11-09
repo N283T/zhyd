@@ -21,8 +21,9 @@ const scoreMoverWithPositions = scoring_mod.scoreMoverWithPositions;
 
 pub const OptConfig = struct {
     n_threads: u32 = 0, // Reserved for future optimizer-internal parallelism.
-    brute_force_limit: u64 = 100_000,
-    interaction_cutoff: f32 = 6.0, // Angstrom -- max distance for mover interaction
+    // Tabulated brute force sums a few table entries per state, so a million
+    // states is cheap; larger cliques fall back to iterative greedy.
+    brute_force_limit: u64 = 1_000_000,
     scoring_params: scorer_mod.ScoringParams = .{},
 };
 
@@ -54,7 +55,7 @@ pub fn optimize(
         allocator,
         movers,
         model.atoms.items,
-        config.interaction_cutoff,
+        scoring_mod.contact_margin,
     );
     defer graph.deinit();
 

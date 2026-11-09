@@ -98,11 +98,11 @@ src/
     scoring.zig         CellList-based scoring with SoA layout + centroid early-exit
     scorer.zig          Dot-sphere bump/H-bond scoring
     mover.zig           Mover struct, Orientation, isAbsentH
-    rotator.zig         OH/SH, NH3+, methyl rotators + fine orientations
+    rotator.zig         OH/SH, NH3+, NH2 rotators + fine orientations (methyls stay staggered)
     flipper.zig         Asn/Gln amide flip, His ring flip
     mover_gen.zig       Mover generation from placed atoms (standard + CCD)
     fix.zig             Mover state override from fix file
-    clique.zig          Interaction graph + connected components
+    clique.zig          Exact interaction graph (any orientation within scoring range) + components
     dot_sphere.zig      Concentric ring dot generation
   writer.zig            Writer module re-exports
   writer/               mmCIF + PDB + JSON output

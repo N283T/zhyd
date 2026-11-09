@@ -744,7 +744,7 @@ pub fn writeZhydLog(
         const res = residues[m.residue_idx];
         const chain = chains[res.chain_idx];
         const action = switch (m.kind) {
-            .single_h_rotator, .nh3_rotator, .nh2_rotator, .methyl_rotator, .aromatic_methyl => "rotate",
+            .single_h_rotator, .nh3_rotator, .nh2_rotator => "rotate",
             .amide_flip => "flip_amide",
             .his_flip => "flip_his",
         };
