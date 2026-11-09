@@ -32,6 +32,15 @@ pub const ScoreContext = struct {
     /// Length equals the total number of atoms in the model.
     /// VDW radii are immutable after placement, so this cache is always valid.
     mover_atom_radii: []f32,
+    /// Movers that pass the centroid early-exit test against each mover, in
+    /// ascending index order: `mover_neighbors[mover_neighbor_offsets[i]..mover_neighbor_offsets[i + 1]]`.
+    /// Precomputed so that scoring a mover does not scan every mover in the model.
+    mover_neighbor_offsets: []u32,
+    mover_neighbors: []u32,
+
+    pub fn neighborsOf(self: *const ScoreContext, mover_idx: u32) []const u32 {
+        return self.mover_neighbors[self.mover_neighbor_offsets[mover_idx]..self.mover_neighbor_offsets[mover_idx + 1]];
+    }
 
     pub fn deinit(self: *ScoreContext, allocator: Allocator) void {
         if (self.cell_list) |*cl| cl.deinit();
@@ -42,6 +51,8 @@ pub const ScoreContext = struct {
         allocator.free(self.mover_centroids);
         allocator.free(self.mover_radii);
         allocator.free(self.mover_atom_radii);
+        allocator.free(self.mover_neighbor_offsets);
+        allocator.free(self.mover_neighbors);
     }
 };
 
@@ -133,6 +144,7 @@ pub fn buildScoreContext(
         var count: usize = 0;
         for (m.orientations) |orient| {
             for (orient.positions) |pos| {
+                if (mover_mod.isAbsentPos(pos)) continue;
                 sum = sum.add(pos);
                 count += 1;
             }
@@ -143,6 +155,7 @@ pub fn buildScoreContext(
         var max_r2: f32 = 0.0;
         for (m.orientations) |orient| {
             for (orient.positions) |pos| {
+                if (mover_mod.isAbsentPos(pos)) continue;
                 const d = pos.sub(centroid);
                 const r2 = d.dot(d);
                 if (r2 > max_r2) max_r2 = r2;
@@ -151,7 +164,11 @@ pub fn buildScoreContext(
         mover_radii[mi] = @sqrt(max_r2);
     }
 
+    const neighbors = try buildMoverNeighbors(allocator, mover_centroids, mover_radii);
+
     return .{
+        .mover_neighbor_offsets = neighbors.offsets,
+        .mover_neighbors = neighbors.list,
         .cell_list = cell_list,
         .static_positions = static_positions,
         .static_atom_indices = static_atom_indices,
@@ -161,6 +178,89 @@ pub fn buildScoreContext(
         .mover_radii = mover_radii,
         .mover_atom_radii = mover_atom_radii,
     };
+}
+
+/// Search radius around each mover atom used by mover scoring, in Angstrom.
+const score_search_radius: f32 = 5.0;
+
+/// Movers whose bounding radius is above this are paired against every mover
+/// instead of through the sweep. Absent H positions are left out of the radius,
+/// so this only guards unusual movers.
+const sweep_radius_limit: f32 = 10.0;
+
+fn mayInteract(centroids: []const math_mod.Vec3(f32), radii: []const f32, a: usize, b: usize) bool {
+    const cutoff = score_search_radius + radii[a] + radii[b];
+    const d = centroids[a].sub(centroids[b]);
+    return d.dot(d) <= cutoff * cutoff;
+}
+
+/// Build the neighbor lists of `ScoreContext.mover_neighbors`. Pairs of
+/// ordinary movers are found with a sweep along x; movers with a large
+/// bounding radius are tested against all others. Every candidate pair goes
+/// through the same test as the scoring loop used before, so the lists hold
+/// exactly the movers that loop would have scored.
+fn buildMoverNeighbors(
+    allocator: Allocator,
+    centroids: []const math_mod.Vec3(f32),
+    radii: []const f32,
+) !struct { offsets: []u32, list: []u32 } {
+    const n = centroids.len;
+    var edges = std.ArrayListUnmanaged([2]u32).empty;
+    defer edges.deinit(allocator);
+
+    const order = try allocator.alloc(u32, n);
+    defer allocator.free(order);
+    var n_small: usize = 0;
+    for (0..n) |i| {
+        if (radii[i] <= sweep_radius_limit) {
+            order[n_small] = @intCast(i);
+            n_small += 1;
+        }
+    }
+    const small = order[0..n_small];
+    std.mem.sort(u32, small, centroids, struct {
+        fn lessThan(c: []const math_mod.Vec3(f32), a: u32, b: u32) bool {
+            return c[a].x < c[b].x;
+        }
+    }.lessThan);
+    const window = score_search_radius + 2 * sweep_radius_limit;
+    for (small, 0..) |a, k| {
+        for (small[k + 1 ..]) |b| {
+            if (centroids[b].x - centroids[a].x > window) break;
+            if (mayInteract(centroids, radii, a, b)) try edges.append(allocator, .{ a, b });
+        }
+    }
+    for (0..n) |a| {
+        if (radii[a] <= sweep_radius_limit) continue;
+        for (0..n) |b| {
+            if (b == a) continue;
+            // A pair of two large movers is visited twice; keep it once.
+            if (radii[b] > sweep_radius_limit and b < a) continue;
+            if (mayInteract(centroids, radii, a, b)) try edges.append(allocator, .{ @intCast(a), @intCast(b) });
+        }
+    }
+
+    const offsets = try allocator.alloc(u32, n + 1);
+    errdefer allocator.free(offsets);
+    @memset(offsets, 0);
+    for (edges.items) |e| {
+        offsets[e[0] + 1] += 1;
+        offsets[e[1] + 1] += 1;
+    }
+    for (0..n) |i| offsets[i + 1] += offsets[i];
+    const list = try allocator.alloc(u32, offsets[n]);
+    errdefer allocator.free(list);
+    const fill = try allocator.alloc(u32, n);
+    defer allocator.free(fill);
+    @memcpy(fill, offsets[0..n]);
+    for (edges.items) |e| {
+        list[fill[e[0]]] = e[1];
+        fill[e[0]] += 1;
+        list[fill[e[1]]] = e[0];
+        fill[e[1]] += 1;
+    }
+    for (0..n) |i| std.mem.sort(u32, list[offsets[i]..offsets[i + 1]], {}, std.sort.asc(u32));
+    return .{ .offsets = offsets, .list = list };
 }
 
 /// Check whether a given atom index belongs to a specific mover.
@@ -260,21 +360,35 @@ pub fn scoreMoverWithPositions(
     allocator: Allocator,
     scratch: *std.ArrayListUnmanaged(u32),
 ) f32 {
+    return scoreMoverExcluding(m, mover_idx, positions_override, movers, model, scoring_params, gap_scale, score_ctx, allocator, scratch, null);
+}
+
+/// Like `scoreMoverWithPositions`, but skips every other mover whose entry in
+/// `skip_movers` is true. Brute-force search uses it for the part of a mover's
+/// score that does not depend on the other movers of its clique.
+pub fn scoreMoverExcluding(
+    m: *const Mover,
+    mover_idx: u32,
+    positions_override: []const math_mod.Vec3(f32),
+    movers: []const Mover,
+    model: *const Model,
+    scoring_params: scorer_mod.ScoringParams,
+    gap_scale: f32,
+    score_ctx: *const ScoreContext,
+    allocator: Allocator,
+    scratch: *std.ArrayListUnmanaged(u32),
+    skip_movers: ?[]const bool,
+) f32 {
     var total: f32 = 0;
     const atoms = model.atoms.items;
-    const search_radius: f32 = 5.0;
-
-    // Centroid early-exit: skip mover pairs where even the closest possible atoms
-    // cannot be within scoring range. The cutoff accounts for each mover's bounding
-    // radius (max displacement of any orientation position from the centroid).
-    const my_centroid = score_ctx.mover_centroids[mover_idx];
-    const my_radius = score_ctx.mover_radii[mover_idx];
+    const search_radius = score_search_radius;
 
     for (m.atom_indices, 0..) |ai, j| {
         // Use the override position for this mover's atom instead of atoms[ai].pos.
         // Read radius from the SoA cache (immutable). Read flags from atoms[ai] because
         // applyOrientation may have updated them (e.g. His flip changes donor/acceptor state).
         const a_pos = positions_override[j];
+        if (mover_mod.isAbsentPos(a_pos)) continue;
         const a_radius = score_ctx.mover_atom_radii[ai];
         const a_flags = atoms[ai].flags;
 
@@ -311,18 +425,15 @@ pub fn scoreMoverWithPositions(
         }
 
         // Mover-controlled atoms: score directly with current coordinates.
-        // Centroid early-exit: skip other movers whose bounding spheres cannot
-        // overlap with this mover's scoring range.
+        // Only movers that pass the centroid early-exit test (their bounding
+        // spheres can reach this mover's scoring range) are in the neighbor list.
         // Radii come from the SoA cache (immutable). Positions and flags are read
         // from model.atoms because flip movers (His) may update flags per orientation.
-        for (movers, 0..) |other_m, other_idx| {
-            if (other_idx == mover_idx) continue;
-            const other_radius = score_ctx.mover_radii[other_idx];
-            const pair_cutoff = search_radius + my_radius + other_radius;
-            const cdiff = my_centroid.sub(score_ctx.mover_centroids[other_idx]);
-            if (cdiff.dot(cdiff) > pair_cutoff * pair_cutoff) continue;
-            for (other_m.atom_indices) |oi| {
+        for (score_ctx.neighborsOf(mover_idx)) |other_idx| {
+            if (skip_movers) |skip| if (skip[other_idx]) continue;
+            for (movers[other_idx].atom_indices) |oi| {
                 if (oi == ai) continue;
+                if (mover_mod.isAbsentPos(atoms[oi].pos)) continue;
                 if (isMoverAtom(m, oi)) continue;
                 total += scorePairSoA(
                     a_pos, a_radius, a_flags,
@@ -333,6 +444,47 @@ pub fn scoreMoverWithPositions(
                     gap_scale,
                 );
             }
+        }
+    }
+    return total;
+}
+
+/// Whether two movers can interact at all, using the same centroid early-exit
+/// test as `scoreMoverExcluding`.
+pub fn moversMayInteract(score_ctx: *const ScoreContext, a: u32, b: u32) bool {
+    return mayInteract(score_ctx.mover_centroids, score_ctx.mover_radii, a, b);
+}
+
+/// Score mover `a`'s atoms against mover `b`'s atoms at their current
+/// positions and flags in `atoms`. This is the term that `scoreMoverExcluding`
+/// adds for `b` when scoring `a`; it is not symmetric, because H-bond
+/// detection reads the flags of the scored atom first.
+pub fn scoreMoverPair(
+    a: *const Mover,
+    b: *const Mover,
+    atoms: []const Atom,
+    scoring_params: scorer_mod.ScoringParams,
+    gap_scale: f32,
+    score_ctx: *const ScoreContext,
+) f32 {
+    var total: f32 = 0;
+    for (a.atom_indices) |ai| {
+        const a_pos = atoms[ai].pos;
+        if (mover_mod.isAbsentPos(a_pos)) continue;
+        const a_radius = score_ctx.mover_atom_radii[ai];
+        const a_flags = atoms[ai].flags;
+        for (b.atom_indices) |oi| {
+            if (oi == ai) continue;
+            if (mover_mod.isAbsentPos(atoms[oi].pos)) continue;
+            if (isMoverAtom(a, oi)) continue;
+            total += scorePairSoA(
+                a_pos, a_radius, a_flags,
+                atoms[oi].pos,
+                score_ctx.mover_atom_radii[oi],
+                atoms[oi].flags,
+                scoring_params,
+                gap_scale,
+            );
         }
     }
     return total;
@@ -470,5 +622,32 @@ test "scorePairSoA produces identical results to scorePair" {
         const score_pair_result = scorePair(atom_a, atom_b, params, gap_scale);
         const score_soa = scorePairSoA(tc.pos_a, tc.r_a, tc.flags_a, tc.pos_b, tc.r_b, tc.flags_b, params, gap_scale);
         try testing.expectEqual(score_pair_result, score_soa);
+    }
+}
+
+test "buildMoverNeighbors matches the all-pairs centroid test" {
+    const allocator = testing.allocator;
+    var prng = std.Random.DefaultPrng.init(42);
+    const rand = prng.random();
+    const n = 300;
+    var centroids: [n]math_mod.Vec3(f32) = undefined;
+    var radii: [n]f32 = undefined;
+    for (0..n) |i| {
+        centroids[i] = .{ .x = rand.float(f32) * 80, .y = rand.float(f32) * 40, .z = rand.float(f32) * 40 };
+        // A few movers with an absent H far away get a very large radius.
+        radii[i] = if (i % 37 == 0) 900 + rand.float(f32) * 100 else rand.float(f32) * 4;
+    }
+    const nb = try buildMoverNeighbors(allocator, &centroids, &radii);
+    defer allocator.free(nb.offsets);
+    defer allocator.free(nb.list);
+
+    var expected = std.ArrayListUnmanaged(u32).empty;
+    defer expected.deinit(allocator);
+    for (0..n) |a| {
+        expected.clearRetainingCapacity();
+        for (0..n) |b| {
+            if (b != a and mayInteract(&centroids, &radii, a, b)) try expected.append(allocator, @intCast(b));
+        }
+        try testing.expectEqualSlices(u32, expected.items, nb.list[nb.offsets[a]..nb.offsets[a + 1]]);
     }
 }

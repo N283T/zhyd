@@ -94,7 +94,7 @@ src/
     water.zig           Water hydrogen placement
   optimize/             Optimization engine
     optimize.zig        Optimize module re-exports
-    optimizer.zig       Clique-based search + fine angular search
+    optimizer.zig       Clique-based search (tabulated brute force) + fine angular search
     scoring.zig         CellList-based scoring with SoA layout + centroid early-exit
     scorer.zig          Dot-sphere bump/H-bond scoring
     mover.zig           Mover struct, Orientation, isAbsentH
@@ -136,9 +136,9 @@ examples/
 ## Performance
 
 - ReleaseFast build for benchmarks
-- CellList spatial index + centroid early-exit + SoA layout for scoring
+- CellList spatial index + precomputed mover neighbor lists + SoA layout for scoring
 - SIMD Vec3 + fast exp approximation
-- Multithreaded singleton/fine-search optimization
+- Singleton and fine-search optimization run sequentially (optimizer-internal parallelism is a TODO since the Zig 0.16 migration)
 - ~0.03s for 309-residue, ~1.0s for 2339-residue (Apple Silicon)
 - Batch: 4370 E. coli structures in 72s (file-level parallelism)
 

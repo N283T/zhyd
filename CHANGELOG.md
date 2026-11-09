@@ -104,6 +104,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `NtermMode` enum re-exported from `zhyd.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
+- Optimization was slow on structures with large cliques: brute force rescored
+  every clique mover for every orientation combination, and every mover score
+  scanned all movers in the model. Brute force now tabulates per-mover and
+  per-pair scores once, and each mover keeps a precomputed list of movers it
+  can interact with. Output is unchanged (byte-identical on the 100-structure
+  benchmark set except one Lys NH3+ whose three H labels permute); 8edu goes
+  from 54 s to 0.3 s and the whole set from 456 s to 13 s of CPU time
+- Absent His H atoms parked at `ABSENT_H_POS` were scored against each other
+  and counted in mover bounding radii and the interaction graph; they are now
+  skipped. The bump terms they added were the same for every candidate, so
+  chosen orientations do not change
+- `--json` logs for multi-model runs could contain NUL bytes in chain and
+  residue names: `MoverSnapshot.chainLabel`/`compId` returned slices into a
+  by-value copy of the snapshot
 - `batch --jsonl` kept only the last few lines: each line was written at file
   offset 0 and overwrote the previous ones; lines are now appended
 - `_entity` written as key-value pairs (single-entity files) now sets residue
