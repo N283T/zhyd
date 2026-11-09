@@ -95,8 +95,9 @@ src/
   optimize/             Optimization engine
     optimize.zig        Optimize module re-exports
     optimizer.zig       Clique-based search (tabulated brute force) + fine angular search
-    scoring.zig         CellList-based scoring with SoA layout + centroid early-exit
-    scorer.zig          Dot-sphere bump/H-bond scoring
+    scoring.zig         Mover scoring: CellList + SoA layout + mover neighbor lists
+    scorer.zig          reduce-style dot scoring; pairDotScore integrates it per atom pair
+    exclusion.zig       Atoms within 3 bonds of a mover atom (distance-inferred), not scored
     mover.zig           Mover struct, Orientation, isAbsentH
     rotator.zig         OH/SH, NH3+, NH2 rotators + fine orientations (methyls stay staggered)
     flipper.zig         Asn/Gln amide flip, His ring flip
