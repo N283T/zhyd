@@ -139,6 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `NtermMode` enum re-exported from `zhyd.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
+- **Hydroxyl H without a named plan were never optimized**: the 3'-terminal
+  HO3' of DNA/RNA and OH placed by distance-based bond inference (ligands
+  without a dictionary entry) got no rotator. Their center and axis now come
+  from coordinates. Ligand H named `H1`/`H2`/`H3` (e.g. in FAD) are no longer
+  mistaken for N-terminal amine H (#273).
 - **PDB output wrote residue numbers with a plus sign** (`ALA A  +1`): Zig
   0.16 prints `+` for positive signed integers formatted with a width. Every
   PDB written since the Zig 0.16 migration is affected

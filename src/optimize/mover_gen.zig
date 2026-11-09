@@ -14,6 +14,7 @@ const model_mod = @import("../model.zig");
 const Model = model_mod.Model;
 const Atom = model_mod.Atom;
 const Residue = model_mod.Residue;
+const Vec3 = @import("../math.zig").Vec3(f32);
 const mover_mod = @import("mover.zig");
 const Mover = mover_mod.Mover;
 const rotator = @import("rotator.zig");
@@ -151,6 +152,41 @@ fn resolveCcdRotatorAtoms(
 /// N-terminal NH3+ and PRO NH2+ groups rotate around the N-CA bond:
 ///   center = N, axis = CA.
 /// Returns true if h_name matches a known N-terminal H name.
+const RotatorAtoms = struct { center: u32, axis: u32 };
+
+/// Longest H–heavy bond accepted when the rotator center is found by distance.
+const max_h_bond = 1.25;
+/// Longest heavy–heavy bond accepted for the rotation axis.
+const max_heavy_bond = 2.0;
+
+/// Resolve a single-H rotator's center and axis from coordinates: the center
+/// is the heavy atom of the residue nearest the H (within a bond length) and
+/// the axis is the heavy atom nearest the center. Used when no plan or
+/// dictionary names them, e.g. the 3'-terminal HO3' or H placed by
+/// distance-based bond inference.
+fn resolveGeometricRotatorAtoms(atoms: []const Atom, res: Residue, h: *const Atom) ?RotatorAtoms {
+    const center = nearestHeavy(atoms, res, h.pos, h.altloc, null, max_h_bond) orelse return null;
+    const axis = nearestHeavy(atoms, res, atoms[center].pos, h.altloc, center, max_heavy_bond) orelse return null;
+    return .{ .center = center, .axis = axis };
+}
+
+fn nearestHeavy(atoms: []const Atom, res: Residue, pos: Vec3, altloc: u8, exclude: ?u32, max_dist: f32) ?u32 {
+    var best: ?u32 = null;
+    var best_d2: f32 = max_dist * max_dist;
+    for (atoms[res.atom_start..res.atom_end], res.atom_start..) |*a, i| {
+        if (a.is_hydrogen) continue;
+        if (exclude) |e| if (e == i) continue;
+        if (a.altloc != ' ' and altloc != ' ' and a.altloc != altloc) continue;
+        const v = a.pos.sub(pos);
+        const d2 = v.dot(v);
+        if (d2 <= best_d2) {
+            best_d2 = d2;
+            best = @intCast(i);
+        }
+    }
+    return best;
+}
+
 fn resolveNtermRotatorAtoms(h_name: []const u8, center_out: *[4]u8, axis_out: *[4]u8) bool {
     const is_nterm_h = std.mem.eql(u8, h_name, "H1") or
         std.mem.eql(u8, h_name, "H2") or
@@ -219,39 +255,42 @@ pub fn generateMovers(
 
         switch (atom.mover_hint) {
             .rotate => {
-                // Single H rotator (OH, SH, etc.)
-                // Try standard plan first, fall back to CCD topology
+                // Single H rotator (OH, SH, etc.). The standard plan or the
+                // dictionary names the center and axis; otherwise they come
+                // from coordinates (3'-terminal HO3', distance-inferred H).
+                // H names alone are not used: ligand H named H1/H2/H3 are
+                // not N-terminal amine H.
                 var center_name_buf: [4]u8 = undefined;
                 var axis_name_buf: [4]u8 = undefined;
-                var center_name: []const u8 = undefined;
-                var axis_name: []const u8 = undefined;
-
-                if (findPlanForH(comp_id, h_name)) |plan| {
+                const named = if (findPlanForH(comp_id, h_name)) |plan| blk: {
                     center_name_buf = plan.connected[0];
                     axis_name_buf = plan.connected[1];
-                    center_name = trimName(&center_name_buf);
-                    axis_name = trimName(&axis_name_buf);
-                } else if (resolveCcdRotatorAtoms(effective_dict, comp_id, h_name, &center_name_buf, &axis_name_buf)) {
-                    center_name = trimName(&center_name_buf);
-                    axis_name = trimName(&axis_name_buf);
-                } else if (resolveNtermRotatorAtoms(h_name, &center_name_buf, &axis_name_buf)) {
-                    center_name = trimName(&center_name_buf);
-                    axis_name = trimName(&axis_name_buf);
+                    break :blk true;
+                } else resolveCcdRotatorAtoms(effective_dict, comp_id, h_name, &center_name_buf, &axis_name_buf);
+
+                var center_idx: u32 = undefined;
+                var axis_idx: u32 = undefined;
+                if (named) {
+                    const center_name = trimName(&center_name_buf);
+                    const axis_name = trimName(&axis_name_buf);
+                    center_idx = findAtomIdx(atoms, res, residue_idx, center_name, target_altloc, mdl.original_atom_count) orelse {
+                        log.warn("center atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ center_name, h_name, comp_id, residue_idx });
+                        n_skipped += 1;
+                        continue;
+                    };
+                    axis_idx = findAtomIdx(atoms, res, residue_idx, axis_name, target_altloc, mdl.original_atom_count) orelse {
+                        log.warn("axis atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ axis_name, h_name, comp_id, residue_idx });
+                        n_skipped += 1;
+                        continue;
+                    };
+                } else if (resolveGeometricRotatorAtoms(atoms, res, atom)) |ra| {
+                    center_idx = ra.center;
+                    axis_idx = ra.axis;
                 } else {
-                    log.warn("no plan for H '{s}' in {s} (res {d}), skipping rotator", .{ h_name, comp_id, residue_idx });
+                    log.warn("no bonded heavy atoms found for H '{s}' in {s} (res {d}), skipping rotator", .{ h_name, comp_id, residue_idx });
                     n_skipped += 1;
                     continue;
                 }
-                const center_idx = findAtomIdx(atoms, res, residue_idx, center_name, target_altloc, mdl.original_atom_count) orelse {
-                    log.warn("center atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ center_name, h_name, comp_id, residue_idx });
-                    n_skipped += 1;
-                    continue;
-                };
-                const axis_idx = findAtomIdx(atoms, res, residue_idx, axis_name, target_altloc, mdl.original_atom_count) orelse {
-                    log.warn("axis atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ axis_name, h_name, comp_id, residue_idx });
-                    n_skipped += 1;
-                    continue;
-                };
                 const h_idx: u32 = @intCast(idx);
 
                 const mover = try rotator.createSingleHRotator(
@@ -607,6 +646,31 @@ test "findPlanForH finds nucleotide plans" {
 
     // Unknown returns null
     try testing.expect(findPlanForH("DA", "HX9") == null);
+}
+
+test "resolveGeometricRotatorAtoms finds the bonded O and its heavy neighbor, not N" {
+    // A ligand hydroxyl H named H1, as in FAD: the H name must not send the
+    // lookup to an N-terminal N. Atom 0 (P) is the O's neighbor, atom 2 (N)
+    // is farther from the O than P, atom 3 is the H.
+    var atoms = [_]Atom{
+        .{ .pos = .{ .x = 0, .y = 0, .z = 0 }, .is_hydrogen = false },
+        .{ .pos = .{ .x = 1.6, .y = 0, .z = 0 }, .is_hydrogen = false },
+        .{ .pos = .{ .x = 4.0, .y = 0, .z = 0 }, .is_hydrogen = false },
+        .{ .pos = .{ .x = 1.9, .y = 0.92, .z = 0 }, .is_hydrogen = true },
+    };
+    atoms[0].setName("P");
+    atoms[1].setName("O1A");
+    atoms[2].setName("N");
+    atoms[3].setName("H1");
+    const res = Residue{ .atom_start = 0, .atom_end = 3 };
+    const ra = resolveGeometricRotatorAtoms(&atoms, res, &atoms[3]).?;
+    try testing.expectEqual(@as(u32, 1), ra.center);
+    try testing.expectEqual(@as(u32, 0), ra.axis);
+
+    // An H with no heavy atom within bonding distance resolves to nothing.
+    var far = atoms[3];
+    far.pos = .{ .x = 10, .y = 10, .z = 10 };
+    try testing.expect(resolveGeometricRotatorAtoms(&atoms, res, &far) == null);
 }
 
 test "findAtomIdx prefers exact altloc and falls back to blank" {
