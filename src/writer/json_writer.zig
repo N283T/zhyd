@@ -44,11 +44,13 @@ pub const MoverSnapshot = struct {
         return snap;
     }
 
-    pub fn chainLabel(self: MoverSnapshot) []const u8 {
+    // Both accessors take a pointer: a by-value `self` is a temporary copy, and the slice
+    // would point into it after the call returns.
+    pub fn chainLabel(self: *const MoverSnapshot) []const u8 {
         return self.chain_label[0..self.chain_label_len];
     }
 
-    pub fn compId(self: MoverSnapshot) []const u8 {
+    pub fn compId(self: *const MoverSnapshot) []const u8 {
         return self.comp_id[0..self.comp_id_len];
     }
 };
@@ -117,7 +119,7 @@ pub fn writeMultiModelLog(
     try out_writer.print("  \"output_isotope\": \"{s}\",\n", .{outputIsotopeStr(bond_policy.output_isotope)});
     try out_writer.writeAll("  \"movers\": [\n");
 
-    for (snapshots, 0..) |snap, i| {
+    for (snapshots, 0..) |*snap, i| {
         try out_writer.print("    {{\"model\": {d}, \"residue\": \"{s}.{s}.{d}\", \"type\": \"{s}\", \"orientation\": {d}}}", .{
             snap.model_num,
             snap.chainLabel(),
@@ -191,4 +193,23 @@ test "write JSON log" {
     try testing.expect(std.mem.find(u8, output, "\"hydrogens_added\": 42") != null);
     try testing.expect(std.mem.find(u8, output, "\"bond_mode\": \"neutron\"") != null);
     try testing.expect(std.mem.find(u8, output, "\"output_isotope\": \"hydrogen\"") != null);
+}
+
+test "multi-model JSON log keeps chain and residue names" {
+    var buf: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer buf.deinit();
+
+    // Many snapshots, so the writer runs long enough to reuse the stack slot
+    // a by-value accessor would have returned a slice into.
+    var snaps: [200]MoverSnapshot = undefined;
+    for (&snaps, 0..) |*s, i| {
+        s.* = .{ .chain_label_len = 1, .comp_id_len = 3, .seq_id = @intCast(i) };
+        s.chain_label[0] = 'B';
+        @memcpy(s.comp_id[0..3], "LEU");
+    }
+    try writeMultiModelLog(&buf.writer, "0.1.0", "test.cif", 0, .{}, &snaps);
+
+    const output = buf.writer.buffered();
+    try testing.expect(std.mem.indexOfScalar(u8, output, 0) == null);
+    try testing.expectEqual(@as(usize, snaps.len), std.mem.count(u8, output, "\"residue\": \"B.LEU."));
 }

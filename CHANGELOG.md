@@ -115,6 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and counted in mover bounding radii and the interaction graph; they are now
   skipped. The bump terms they added were the same for every candidate, so
   chosen orientations do not change
+- `--json` logs for multi-model runs could contain NUL bytes in chain and
+  residue names: `MoverSnapshot.chainLabel`/`compId` returned slices into a
+  by-value copy of the snapshot
 - `batch --jsonl` kept only the last few lines: each line was written at file
   offset 0 and overwrote the previous ones; lines are now appended
 - `_entity` written as key-value pairs (single-entity files) now sets residue
