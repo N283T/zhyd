@@ -139,6 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `NtermMode` enum re-exported from `zhyd.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
+- **PDB output wrote residue numbers with a plus sign** (`ALA A  +1`): Zig
+  0.16 prints `+` for positive signed integers formatted with a width. Every
+  PDB written since the Zig 0.16 migration is affected
+- Added H on ligands and other non-polymer residues are written as `HETATM`
+  in PDB output too, like the residue's own atoms
 - **CCD-derived H on the same atom were placed on top of each other.**
   Methyl and methylene H of ligands and other components placed from a
   dictionary all got the same fixed dihedral, so e.g. the three H of each
