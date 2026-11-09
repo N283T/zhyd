@@ -46,6 +46,7 @@ pub const ProcessResult = struct {
     n_singletons: u32 = 0,
     n_brute_force: u32 = 0,
     n_vertex_cut: u32 = 0,
+    n_elimination: u32 = 0,
     /// Per-stage wall time of this file (printed with --timing).
     timing: StageTimes = .{},
 
@@ -224,6 +225,7 @@ fn processModelShared(
             result.n_singletons += opt_result.n_singletons;
             result.n_brute_force += opt_result.n_brute_force;
             result.n_vertex_cut += opt_result.n_vertex_cut;
+            result.n_elimination += opt_result.n_elimination;
         }
 
         // Capture mover snapshots for JSON log before movers are freed

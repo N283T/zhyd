@@ -94,7 +94,8 @@ src/
     water.zig           Water hydrogen placement
   optimize/             Optimization engine
     optimize.zig        Optimize module re-exports
-    optimizer.zig       Clique-based search (tabulated brute force) + fine angular search
+    optimizer.zig       Clique-based search (tabulated brute force / elimination) + fine angular search
+    elimination.zig     Exact max-sum variable elimination for cliques beyond brute force
     scoring.zig         Mover scoring: CellList + SoA layout + mover neighbor lists
     scorer.zig          reduce-style dot scoring; pairDotScore integrates it per atom pair
     exclusion.zig       Atoms within 3 bonds of a mover atom (distance-inferred), not scored
