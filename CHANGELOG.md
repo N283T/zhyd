@@ -139,6 +139,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `NtermMode` enum re-exported from `zhyd.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
+- **CCD-derived H on the same atom were placed on top of each other.**
+  Methyl and methylene H of ligands and other components placed from a
+  dictionary all got the same fixed dihedral, so e.g. the three H of each
+  heme methyl coincided. Bond angles and dihedrals now come from the
+  component's ideal coordinates, or, when it has none (inline or
+  distance-derived components, CCD entries without ideal coordinates), are
+  spread over the staggered positions. Methylene H are placed against an
+  explicit second neighbor, which also places the propionate CH2 H of heme
+  that were skipped for a missing reference atom (4hhb: 14 skipped H -> 0)
+- Added H on ligands, waters and other non-polymer residues were written as
+  `ATOM` with the residue number in `label_seq_id`; they now copy
+  `group_PDB` and `label_seq_id` from their residue (`HETATM`, `.`)
 - Fix-file entries that match no mover (a typo, a methyl group, a residue
   missing from the model) now log a warning instead of being ignored silently
 - The run summary no longer calls H skipped for a missing reference atom a

@@ -146,6 +146,5 @@ examples/
 
 ## Open areas
 
-- CCD dihedral estimation uses fixed heuristics (not computed from ideal coords)
 - Distance-based bond inference cannot detect aromatic rings; bond order promotion uses valence heuristics only
 - State-dependent chemistry updates for flip movers are per-orientation flags only

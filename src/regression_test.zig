@@ -428,6 +428,19 @@ test "CCD ligand placement: H atoms placed on HETATM LIG via inline dict" {
     }
 
     try testing.expect(n_placed_h > 0);
+
+    // H on the same heavy atom must not coincide: the fixture has no ideal
+    // coordinates, so their dihedrals come from the fallback spread.
+    for (mdl.atoms.items, 0..) |a, i| {
+        if (!a.is_added or !a.is_hydrogen) continue;
+        for (mdl.atoms.items[i + 1 ..]) |b| {
+            if (!b.is_added or !b.is_hydrogen) continue;
+            if (a.pos.distance(b.pos) < 1.0) {
+                std.debug.print("H {s} and {s} are {d:.3} A apart\n", .{ a.nameSlice(), b.nameSlice(), a.pos.distance(b.pos) });
+                return error.TestUnexpectedResult;
+            }
+        }
+    }
 }
 
 test "pinned regression: ccd_ligand.cif H count is stable" {

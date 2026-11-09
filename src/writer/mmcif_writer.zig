@@ -152,7 +152,12 @@ fn writeAddedHRow(
         if (col > 0) try writer.writeByte(' ');
         const cw = col_widths[col];
         if (cm.group_pdb != null and col == cm.group_pdb.?) {
-            try writePaddedCell(writer, "ATOM", cw);
+            // Same record type as the residue's own atoms (HETATM for ligands).
+            if (first_orig_row < orig_loop.length()) {
+                try writePaddedCifValue(writer, orig_loop.val(first_orig_row, col) orelse "ATOM", cw);
+            } else {
+                try writePaddedCell(writer, "ATOM", cw);
+            }
         } else if (cm.id != null and col == cm.id.?) {
             try writePaddedInt(writer, serial, cw);
         } else if (cm.type_symbol != null and col == cm.type_symbol.?) {
@@ -176,7 +181,12 @@ fn writeAddedHRow(
                 try writePaddedCell(writer, ".", cw);
             }
         } else if (cm.label_seq_id != null and col == cm.label_seq_id.?) {
-            try writePaddedInt(writer, res.seq_id, cw);
+            // Copied from the residue: non-polymer residues have "." here.
+            if (first_orig_row < orig_loop.length()) {
+                try writePaddedCifValue(writer, orig_loop.val(first_orig_row, col) orelse ".", cw);
+            } else {
+                try writePaddedInt(writer, res.seq_id, cw);
+            }
         } else if (cm.cartn_x != null and col == cm.cartn_x.?) {
             try writePaddedFloat3(writer, atom.pos.x, cw);
         } else if (cm.cartn_y != null and col == cm.cartn_y.?) {
