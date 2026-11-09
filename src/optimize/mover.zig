@@ -97,8 +97,14 @@ pub const Mover = struct {
 
 /// Check if an atom is at the sentinel (absent) position.
 pub fn isAbsentH(atom: Atom) bool {
-    return atom.is_added and
-        atom.pos.x > 999.0 and atom.pos.y > 999.0 and atom.pos.z > 999.0;
+    return atom.is_added and isAbsentPos(atom.pos);
+}
+
+/// Whether a position is the `ABSENT_H_POS` sentinel. Absent H atoms of
+/// different movers share this position, so scoring and the interaction graph
+/// must skip them or they bump into each other.
+pub fn isAbsentPos(pos: Vec3(f32)) bool {
+    return pos.x > 999.0 and pos.y > 999.0 and pos.z > 999.0;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

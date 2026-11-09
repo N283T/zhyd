@@ -219,6 +219,14 @@ fn fineSearchMover(
     // The coarse best is already applied to model.atoms (done before this phase starts).
 }
 
+/// Exhaustive search over every orientation combination of a clique.
+///
+/// The score of a combination is a sum of atom-pair terms, so it splits into
+/// one term per mover (static atoms and movers outside the clique) and one
+/// term per ordered pair of interacting clique movers. Both are tabulated
+/// once, and the enumeration only adds table entries. Scoring every mover
+/// from scratch for each combination made cliques near `brute_force_limit`
+/// take tens of seconds.
 fn optimizeBruteForce(
     allocator: Allocator,
     movers: []Mover,
@@ -229,49 +237,132 @@ fn optimizeBruteForce(
     scratch: *std.ArrayListUnmanaged(u32),
 ) !void {
     const n = clq.len;
-    // Current orientation indices for each mover in clique
-    const indices = try allocator.alloc(u16, n);
-    defer allocator.free(indices);
-    @memset(indices, 0);
+    const atoms = model.atoms.items;
+    const params = config.scoring_params;
+    const gap_scale = params.gap_scale;
+
+    // Candidate orientations per clique member: only the locked one when fixed.
+    const n_cand = try allocator.alloc(u16, n);
+    defer allocator.free(n_cand);
+    for (clq, 0..) |mi, i| n_cand[i] = movers[mi].effectiveOrientations();
+
+    const in_clique = try allocator.alloc(bool, movers.len);
+    defer allocator.free(in_clique);
+    @memset(in_clique, false);
+    for (clq) |mi| in_clique[mi] = true;
+
+    var max_atoms: usize = 0;
+    for (clq) |mi| max_atoms = @max(max_atoms, movers[mi].atom_indices.len);
+    const pos_buf = try allocator.alloc(Vec3(f32), max_atoms);
+    defer allocator.free(pos_buf);
+
+    // Per-mover term (including the orientation penalty) for each candidate.
+    const self_offsets = try allocator.alloc(usize, n + 1);
+    defer allocator.free(self_offsets);
+    self_offsets[0] = 0;
+    for (0..n) |i| self_offsets[i + 1] = self_offsets[i] + n_cand[i];
+    const self_table = try allocator.alloc(f32, self_offsets[n]);
+    defer allocator.free(self_table);
     for (clq, 0..) |mi, i| {
-        if (movers[mi].is_fixed) indices[i] = movers[mi].best_orientation;
+        const m = &movers[mi];
+        for (0..n_cand[i]) |c| {
+            const o = candidateOrientation(m, @intCast(c));
+            m.applyOrientation(atoms, o);
+            const positions = pos_buf[0..m.atom_indices.len];
+            for (m.atom_indices, 0..) |ai, j| positions[j] = atoms[ai].pos;
+            const s = scoring_mod.scoreMoverExcluding(m, mi, positions, movers, model, params, gap_scale, score_ctx, allocator, scratch, in_clique);
+            self_table[self_offsets[i] + c] = s - m.orientationPenalty(o);
+        }
     }
+
+    // Pair terms for interacting clique members i < j: both directions summed,
+    // stored row-major over (candidate of i, candidate of j).
+    const Pair = struct { i: usize, j: usize, offset: usize };
+    var pairs = std.ArrayListUnmanaged(Pair).empty;
+    defer pairs.deinit(allocator);
+    var pair_len: usize = 0;
+    for (0..n) |i| {
+        for (i + 1..n) |j| {
+            if (!scoring_mod.moversMayInteract(score_ctx, clq[i], clq[j])) continue;
+            try pairs.append(allocator, .{ .i = i, .j = j, .offset = pair_len });
+            pair_len += @as(usize, n_cand[i]) * n_cand[j];
+        }
+    }
+    const pair_table = try allocator.alloc(f32, pair_len);
+    defer allocator.free(pair_table);
+    for (pairs.items) |p| {
+        const a = &movers[clq[p.i]];
+        const b = &movers[clq[p.j]];
+        for (0..n_cand[p.i]) |ca| {
+            a.applyOrientation(atoms, candidateOrientation(a, @intCast(ca)));
+            for (0..n_cand[p.j]) |cb| {
+                b.applyOrientation(atoms, candidateOrientation(b, @intCast(cb)));
+                pair_table[p.offset + ca * n_cand[p.j] + cb] =
+                    scoring_mod.scoreMoverPair(a, b, atoms, params, gap_scale, score_ctx) +
+                    scoring_mod.scoreMoverPair(b, a, atoms, params, gap_scale, score_ctx);
+            }
+        }
+    }
+
+    // Pairs grouped by their later member, so the score of a prefix of the
+    // mixed-radix counter can be reused when only later digits change.
+    const pairs_by_j = try allocator.alloc(std.ArrayListUnmanaged(Pair), n);
+    defer {
+        for (pairs_by_j) |*l| l.deinit(allocator);
+        allocator.free(pairs_by_j);
+    }
+    for (pairs_by_j) |*l| l.* = .empty;
+    for (pairs.items) |p| try pairs_by_j[p.j].append(allocator, p);
+
+    // prefix[k] = score of members 0..k-1 with their current candidates.
+    const cand = try allocator.alloc(u16, n);
+    defer allocator.free(cand);
+    @memset(cand, 0);
+    const best = try allocator.alloc(u16, n);
+    defer allocator.free(best);
+    @memset(best, 0);
+    const prefix = try allocator.alloc(f32, n + 1);
+    defer allocator.free(prefix);
+    prefix[0] = 0;
 
     var best_score: f32 = -std.math.inf(f32);
-    const best_indices = try allocator.alloc(u16, n);
-    defer allocator.free(best_indices);
-    @memset(best_indices, 0);
-    for (clq, 0..) |mi, i| {
-        if (movers[mi].is_fixed) best_indices[i] = movers[mi].best_orientation;
-    }
-
-    // Enumerate all combinations
+    var first_dirty: usize = 0;
     while (true) {
-        // Apply current combination
-        for (clq, 0..) |mi, i| {
-            movers[mi].applyOrientation(model.atoms.items, indices[i]);
+        for (first_dirty..n) |k| {
+            var s = prefix[k] + self_table[self_offsets[k] + cand[k]];
+            for (pairs_by_j[k].items) |p| {
+                s += pair_table[p.offset + @as(usize, cand[p.i]) * n_cand[k] + cand[k]];
+            }
+            prefix[k + 1] = s;
+        }
+        if (prefix[n] > best_score) {
+            best_score = prefix[n];
+            @memcpy(best, cand);
         }
 
-        // Score all movers in clique
-        var total_score: f32 = 0;
-        for (clq, 0..) |mi, i| {
-            total_score += scoreMover(&movers[mi], mi, movers, model, config.scoring_params, config.scoring_params.gap_scale, score_ctx, allocator, scratch);
-            total_score -= movers[mi].orientationPenalty(indices[i]);
-        }
-
-        if (total_score > best_score) {
-            best_score = total_score;
-            @memcpy(best_indices, indices);
-        }
-
-        // Increment indices (mixed radix counter)
-        if (!incrementIndices(indices, movers, clq)) break;
+        // Mixed-radix increment, last digit fastest (same order as before).
+        var k: usize = n;
+        const done = while (k > 0) {
+            k -= 1;
+            cand[k] += 1;
+            if (cand[k] < n_cand[k]) break false;
+            cand[k] = 0;
+        } else true;
+        if (done) break;
+        first_dirty = k;
     }
 
-    // Record best orientations
     for (clq, 0..) |mi, i| {
-        movers[mi].best_orientation = best_indices[i];
+        const o = candidateOrientation(&movers[mi], best[i]);
+        movers[mi].best_orientation = o;
+        movers[mi].applyOrientation(atoms, o);
     }
+}
+
+/// Orientation index of candidate `c` of a mover: the locked orientation for a
+/// fixed mover, otherwise `c` itself.
+fn candidateOrientation(m: *const Mover, c: u16) u16 {
+    return if (m.is_fixed) m.best_orientation else c;
 }
 
 fn incrementIndices(indices: []u16, movers: []const Mover, clq: []const u32) bool {
@@ -332,6 +423,64 @@ fn allFixed(movers: []const Mover, clq: []const u32) bool {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+/// Reference brute force that rescores every mover for every combination.
+/// Kept for tests that check `optimizeBruteForce` against it.
+fn optimizeBruteForceReference(
+    allocator: Allocator,
+    movers: []Mover,
+    clq: []const u32,
+    model: *Model,
+    config: OptConfig,
+    score_ctx: *const ScoreContext,
+    scratch: *std.ArrayListUnmanaged(u32),
+) !void {
+    const n = clq.len;
+    // Current orientation indices for each mover in clique
+    const indices = try allocator.alloc(u16, n);
+    defer allocator.free(indices);
+    @memset(indices, 0);
+    for (clq, 0..) |mi, i| {
+        if (movers[mi].is_fixed) indices[i] = movers[mi].best_orientation;
+    }
+
+    var best_score: f32 = -std.math.inf(f32);
+    const best_indices = try allocator.alloc(u16, n);
+    defer allocator.free(best_indices);
+    @memset(best_indices, 0);
+    for (clq, 0..) |mi, i| {
+        if (movers[mi].is_fixed) best_indices[i] = movers[mi].best_orientation;
+    }
+
+    // Enumerate all combinations
+    while (true) {
+        // Apply current combination
+        for (clq, 0..) |mi, i| {
+            movers[mi].applyOrientation(model.atoms.items, indices[i]);
+        }
+
+        // Score all movers in clique
+        var total_score: f32 = 0;
+        for (clq, 0..) |mi, i| {
+            total_score += scoreMover(&movers[mi], mi, movers, model, config.scoring_params, config.scoring_params.gap_scale, score_ctx, allocator, scratch);
+            total_score -= movers[mi].orientationPenalty(indices[i]);
+        }
+
+        if (total_score > best_score) {
+            best_score = total_score;
+            @memcpy(best_indices, indices);
+        }
+
+        // Increment indices (mixed radix counter)
+        if (!incrementIndices(indices, movers, clq)) break;
+    }
+
+    // Record best orientations
+    for (clq, 0..) |mi, i| {
+        movers[mi].best_orientation = best_indices[i];
+    }
+}
+
 
 const testing = std.testing;
 
@@ -924,5 +1073,62 @@ test "optimize() with multiple independent singletons gets correct results" {
     // Every mover should pick orientation 1 (no bump)
     for (movers_buf) |m| {
         try testing.expectEqual(@as(u16, 1), m.best_orientation);
+    }
+}
+
+test "tabulated brute force matches the rescoring reference" {
+    // Random cliques of single-atom movers among static atoms, with donor and
+    // acceptor flags and a fixed member, must give the same orientations as
+    // rescoring every mover for every combination.
+    const allocator = testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0x5eed);
+    const rand = prng.random();
+
+    for (0..20) |_| {
+        var model = Model.init(allocator);
+        defer model.deinit();
+
+        const n_movers: u32 = 5;
+        const n_static: u32 = 8;
+        for (0..n_movers + n_static) |k| {
+            try model.atoms.append(allocator, .{
+                .pos = .{ .x = rand.float(f32) * 6, .y = rand.float(f32) * 6, .z = rand.float(f32) * 6 },
+                .vdw_radius = 1.2 + rand.float(f32) * 0.6,
+                .flags = .{ .donor = k % 3 == 0, .acceptor = k % 3 == 1 },
+            });
+        }
+
+        var movers_a: [n_movers]Mover = undefined;
+        var movers_b: [n_movers]Mover = undefined;
+        for (0..n_movers) |i| {
+            var positions: [4]Vec3(f32) = undefined;
+            var penalties: [4]f32 = undefined;
+            for (0..4) |o| {
+                positions[o] = .{ .x = rand.float(f32) * 6, .y = rand.float(f32) * 6, .z = rand.float(f32) * 6 };
+                penalties[o] = rand.float(f32) * 0.3;
+            }
+            movers_a[i] = try makeTestMover(allocator, @intCast(i), &positions, &penalties);
+            movers_b[i] = try makeTestMover(allocator, @intCast(i), &positions, &penalties);
+        }
+        defer for (&movers_a) |*m| m.deinit();
+        defer for (&movers_b) |*m| m.deinit();
+        movers_a[2].lockToOrientation(3);
+        movers_b[2].lockToOrientation(3);
+
+        const clq = [_]u32{ 0, 1, 2, 3, 4 };
+        var scratch = std.ArrayListUnmanaged(u32).empty;
+        defer scratch.deinit(allocator);
+
+        var ctx_a = try buildScoreContext(allocator, &movers_a, model.atoms.items);
+        defer ctx_a.deinit(allocator);
+        try optimizeBruteForceReference(allocator, &movers_a, &clq, &model, .{}, &ctx_a, &scratch);
+
+        var ctx_b = try buildScoreContext(allocator, &movers_b, model.atoms.items);
+        defer ctx_b.deinit(allocator);
+        try optimizeBruteForce(allocator, &movers_b, &clq, &model, .{}, &ctx_b, &scratch);
+
+        for (0..n_movers) |i| {
+            try testing.expectEqual(movers_a[i].best_orientation, movers_b[i].best_orientation);
+        }
     }
 }

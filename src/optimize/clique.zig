@@ -1,5 +1,6 @@
 //! Interaction graph and clique (connected component) detection for movers.
 //! Two movers interact if any of their controlled atoms are within a cutoff distance.
+//! Absent H atoms (at `Mover.ABSENT_H_POS`) are ignored.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -94,12 +95,17 @@ fn buildWithCellList(
     const centroids = try allocator.alloc(Vec3(f32), n);
     defer allocator.free(centroids);
 
+    // Absent H atoms sit at ABSENT_H_POS and are skipped throughout; a mover
+    // with no present atom gets the origin, and moversInteract never pairs it.
     for (movers, 0..) |mover, i| {
         var sum = Vec3(f32){ .x = 0, .y = 0, .z = 0 };
+        var n_present: usize = 0;
         for (mover.atom_indices) |ai| {
+            if (mover_mod.isAbsentPos(atoms[ai].pos)) continue;
             sum = sum.add(atoms[ai].pos);
+            n_present += 1;
         }
-        const count: f32 = @floatFromInt(mover.atom_indices.len);
+        const count: f32 = @floatFromInt(@max(n_present, 1));
         centroids[i] = Vec3(f32){
             .x = sum.x / count,
             .y = sum.y / count,
@@ -111,6 +117,7 @@ fn buildWithCellList(
     var max_radius: f32 = 0.0;
     for (movers, 0..) |mover, i| {
         for (mover.atom_indices) |ai| {
+            if (mover_mod.isAbsentPos(atoms[ai].pos)) continue;
             const diff = atoms[ai].pos.sub(centroids[i]);
             const d = @sqrt(diff.dot(diff));
             if (d > max_radius) max_radius = d;
@@ -148,7 +155,9 @@ fn buildWithCellList(
 fn moversInteract(a: Mover, b: Mover, atoms: []const Atom, cutoff: f32) bool {
     const cutoff2 = cutoff * cutoff;
     for (a.atom_indices) |ai| {
+        if (mover_mod.isAbsentPos(atoms[ai].pos)) continue;
         for (b.atom_indices) |bi| {
+            if (mover_mod.isAbsentPos(atoms[bi].pos)) continue;
             const diff = atoms[ai].pos.sub(atoms[bi].pos);
             if (diff.dot(diff) <= cutoff2) return true;
         }
@@ -336,4 +345,34 @@ test "chain of interactions" {
     // All three form one clique through transitivity
     try testing.expectEqual(@as(usize, 1), cliques.len);
     try testing.expectEqual(@as(usize, 3), cliques[0].len);
+}
+
+test "absent H atoms do not connect distant movers" {
+    const allocator = testing.allocator;
+
+    // Two His-like movers 100 A apart, each with one H parked at ABSENT_H_POS.
+    // The sentinel atoms coincide, but the movers must stay separate.
+    var atoms = [_]Atom{
+        .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } },
+        .{ .pos = Mover.ABSENT_H_POS, .is_added = true },
+        .{ .pos = .{ .x = 100.0, .y = 0.0, .z = 0.0 } },
+        .{ .pos = Mover.ABSENT_H_POS, .is_added = true },
+    };
+
+    var m0 = try makeMover(allocator, &.{ 0, 1 });
+    defer m0.deinit();
+    var m1 = try makeMover(allocator, &.{ 2, 3 });
+    defer m1.deinit();
+
+    const movers = [_]Mover{ m0, m1 };
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, 6.0);
+    defer graph.deinit();
+
+    const cliques = try findCliques(allocator, &graph);
+    defer {
+        for (cliques) |c| allocator.free(c);
+        allocator.free(cliques);
+    }
+
+    try testing.expectEqual(@as(usize, 2), cliques.len);
 }
