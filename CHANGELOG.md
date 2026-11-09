@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **Methyl groups are no longer optimized.** They stay staggered as placed.
+  The score has no torsion term, so optimization turned 21 % of methyls
+  eclipsed (24,425 of 116,224 on the 100-structure benchmark set), and their
+  movers (about 65 % of all movers) joined most of a large protein into one
+  clique that only got the greedy search. `methyl_rotator` and
+  `aromatic_methyl` mover kinds are gone; fix-file entries for methyl groups
+  now match no mover
+- The interaction graph joins two movers only when some atom of one, in any
+  orientation, is within scoring range (radius sum + 0.5 A) of some atom of
+  the other, instead of within 6 A at the current positions. Components are
+  therefore independent and are optimized exactly; the brute-force limit is
+  raised from 100,000 to 1,000,000 states. On the 100-structure set, greedy
+  cliques drop to 19 and 9qr3 goes from one 8,933-mover clique to 588
+  brute-force cliques and 1,706 singletons
+- NH3+ rotators use 0/30/60/90 degree orientations (fine search +-15 degrees
+  in 5 degree steps). The old 0/+60/-60 set had two identical orientations
+  under the group's 3-fold symmetry. NH3+ fix-file indices change meaning
 - **Renamed from zreduce to zhyd** (repository, executable, Zig module and
   package). The scope now covers protonation states and pKa, not only
   reduce-style hydrogen placement. No `zreduce` alias is kept. The mmCIF

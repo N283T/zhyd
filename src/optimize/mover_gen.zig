@@ -2,8 +2,11 @@
 //!
 //! Inspects `mover_hint` on each added hydrogen atom, resolves axis/center
 //! atoms from placement plans, and delegates to rotator constructors.
-//! Supports single-H rotators, methyl rotators, NH3 rotators,
-//! amide flippers (ASN/GLN), and histidine ring flippers.
+//! Supports single-H rotators, NH3 rotators, NH2 rotators,
+//! amide flippers (ASN/GLN), and histidine ring flippers. Methyl groups get
+//! no mover: they stay staggered as placed. The scoring has no torsion term,
+//! so letting contacts rotate them only pushed them toward eclipsed, and
+//! their thousands of movers merged most of a protein into one clique.
 
 const std = @import("std");
 const log = std.log.scoped(.mover_gen);
@@ -325,9 +328,10 @@ pub fn generateMovers(
                 );
                 try movers.append(allocator, mover);
             },
-            .rotate_methyl, .rotate_nh3 => {
+            .rotate_methyl => continue,
+            .rotate_nh3 => {
                 if (residue_state) |state| {
-                    if (state == .lys and state.lys == .neutral and atom.mover_hint == .rotate_nh3) continue;
+                    if (state == .lys and state.lys == .neutral) continue;
                 }
                 // Group rotator: 3 H atoms share same center.
                 // Try standard plan first, fall back to CCD topology.
@@ -401,25 +405,14 @@ pub fn generateMovers(
                     continue;
                 }
 
-                const mover = switch (atom.mover_hint) {
-                    .rotate_methyl => try rotator.createMethylRotator(
-                        allocator,
-                        atoms,
-                        h_indices,
-                        center_idx,
-                        axis_idx,
-                        residue_idx,
-                    ),
-                    .rotate_nh3 => try rotator.createNH3Rotator(
-                        allocator,
-                        atoms,
-                        h_indices,
-                        center_idx,
-                        axis_idx,
-                        residue_idx,
-                    ),
-                    else => continue,
-                };
+                const mover = try rotator.createNH3Rotator(
+                    allocator,
+                    atoms,
+                    h_indices,
+                    center_idx,
+                    axis_idx,
+                    residue_idx,
+                );
                 try movers.append(allocator, mover);
             },
             .flip_amide => {
@@ -630,7 +623,7 @@ test "findAtomIdx prefers exact altloc and falls back to blank" {
     try testing.expectEqual(findAtomIdx(mdl.atoms.items, res0, 0, "N", 'B', orig).?, 0);
 }
 
-test "generateMovers creates methyl rotator for ALA" {
+test "generateMovers creates no mover for ALA methyl H" {
     const source = @embedFile("../test_data/tiny.cif");
     var mdl = try mmcif.parseModel(testing.allocator, source);
     defer mdl.deinit();
@@ -645,15 +638,24 @@ test "generateMovers creates methyl rotator for ALA" {
         testing.allocator.free(movers);
     }
 
-    // ALA has 1 methyl group on CB -> should produce 1 methyl_rotator
-    var methyl_count: u32 = 0;
-    for (movers) |m| {
-        if (m.kind == .methyl_rotator) methyl_count += 1;
-    }
-    try testing.expectEqual(@as(u32, 1), methyl_count);
+    // The CB methyl stays staggered as placed: no mover controls its H.
+    try expectNoMethylMover(&mdl, movers);
 }
 
-test "generateMovers creates separate methyl rotators per altloc conformer" {
+fn expectNoMethylMover(mdl: *const Model, movers: []const Mover) !void {
+    var n_methyl_h: u32 = 0;
+    for (mdl.atoms.items) |a| {
+        if (a.is_added and a.mover_hint == .rotate_methyl) n_methyl_h += 1;
+    }
+    try testing.expect(n_methyl_h > 0);
+    for (movers) |m| {
+        for (m.atom_indices) |ai| {
+            try testing.expect(mdl.atoms.items[ai].mover_hint != .rotate_methyl);
+        }
+    }
+}
+
+test "generateMovers creates no methyl mover for any altloc conformer" {
     const source = @embedFile("../test_data/ala_altloc.cif");
     var mdl = try mmcif.parseModel(testing.allocator, source);
     defer mdl.deinit();
@@ -668,20 +670,7 @@ test "generateMovers creates separate methyl rotators per altloc conformer" {
         testing.allocator.free(movers);
     }
 
-    var methyl_count: u32 = 0;
-    var center_a: u32 = 0;
-    var center_b: u32 = 0;
-    for (movers) |m| {
-        if (m.kind != .methyl_rotator) continue;
-        methyl_count += 1;
-        const center_idx = m.center_idx.?;
-        if (mdl.atoms.items[center_idx].altloc == 'A') center_a += 1;
-        if (mdl.atoms.items[center_idx].altloc == 'B') center_b += 1;
-    }
-
-    try testing.expectEqual(@as(u32, 2), methyl_count);
-    try testing.expectEqual(@as(u32, 1), center_a);
-    try testing.expectEqual(@as(u32, 1), center_b);
+    try expectNoMethylMover(&mdl, movers);
 }
 
 test "generateMovers total count for ALA" {
@@ -699,16 +688,10 @@ test "generateMovers total count for ALA" {
         testing.allocator.free(movers);
     }
 
-    // ALA N-terminal should have: 1 methyl rotator (CB) + 1 NH3+ rotator (N-terminal H1/H2/H3)
-    // No single-H rotators (ALA has no OH/SH groups)
-    var methyl_count: u32 = 0;
-    var nh3_count: u32 = 0;
-    for (movers) |m| {
-        if (m.kind == .methyl_rotator) methyl_count += 1;
-        if (m.kind == .nh3_rotator) nh3_count += 1;
-    }
-    try testing.expectEqual(@as(u32, 1), methyl_count);
-    try testing.expectEqual(@as(u32, 1), nh3_count);
+    // N-terminal ALA has only the NH3+ rotator (H1/H2/H3): its CB methyl gets
+    // no mover and it has no OH/SH groups.
+    try testing.expectEqual(@as(usize, 1), movers.len);
+    try testing.expectEqual(mover_mod.MoverKind.nh3_rotator, movers[0].kind);
 }
 
 test "optimizer pipeline runs without error on ALA" {
@@ -735,7 +718,7 @@ test "optimizer pipeline runs without error on ALA" {
     _ = try opt_mod.optimize(testing.allocator, movers, &mdl, opt_config);
 }
 
-test "methyl rotator controls 3 atoms" {
+test "NH3 rotator controls 3 atoms" {
     const source = @embedFile("../test_data/tiny.cif");
     var mdl = try mmcif.parseModel(testing.allocator, source);
     defer mdl.deinit();
@@ -751,9 +734,9 @@ test "methyl rotator controls 3 atoms" {
     }
 
     for (movers) |m| {
-        if (m.kind == .methyl_rotator) {
+        if (m.kind == .nh3_rotator) {
             try testing.expectEqual(@as(usize, 3), m.atom_indices.len);
-            try testing.expectEqual(@as(usize, 3), m.orientations.len);
+            try testing.expectEqual(@as(usize, 4), m.orientations.len);
         }
     }
 }

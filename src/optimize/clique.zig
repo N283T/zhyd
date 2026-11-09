@@ -1,6 +1,6 @@
 //! Interaction graph and clique (connected component) detection for movers.
-//! Two movers interact if any of their controlled atoms are within a cutoff distance.
-//! Absent H atoms (at `Mover.ABSENT_H_POS`) are ignored.
+//! Two movers interact if some atom of one, in any orientation, is within
+//! scoring range of some atom of the other. Absent H atoms are ignored.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -26,14 +26,20 @@ pub const InteractionGraph = struct {
     }
 };
 
-/// Build interaction graph: edge between movers whose atoms can interact.
-/// cutoff: maximum distance between any pair of atoms for two movers to be considered interacting.
-/// Typically VDW_radius_sum + probe_radius + overlap_margin (~6-8 Å).
+/// Build the interaction graph: an edge joins two movers when some atom of one,
+/// in some orientation, comes within `r_a + r_b + contact_margin` of some atom
+/// of the other in some orientation. Beyond that distance `scorePair` is zero,
+/// so movers in different connected components never change each other's
+/// score and each component can be optimized on its own without loss.
+///
+/// Positions considered for each mover atom are its current position and its
+/// position in every orientation. Absent H atoms (at `Mover.ABSENT_H_POS`)
+/// are ignored. Radii are the atoms' `vdw_radius`.
 pub fn buildInteractionGraph(
     allocator: Allocator,
     movers: []const Mover,
     atoms: []const Atom,
-    cutoff: f32,
+    contact_margin: f32,
 ) !InteractionGraph {
     const n = movers.len;
     var adj_lists = try allocator.alloc(std.ArrayListUnmanaged(u32), n);
@@ -43,26 +49,62 @@ pub fn buildInteractionGraph(
         allocator.free(adj_lists);
     }
 
-    // Use CellList spatial index to avoid checking all O(M^2) mover pairs.
-    // Compute a centroid for each mover and find the max distance from any
-    // centroid to its atoms (max_radius). Then build a CellList over centroids
-    // with cell_size = cutoff + 2*max_radius so that querying within that radius
-    // gives exactly the candidate pairs that could possibly interact.
-    // Fall back to brute force if the grid would be too large.
-    buildWithCellList(allocator, movers, atoms, cutoff, adj_lists) catch |err| switch (err) {
-        error.GridTooLarge => {
-            // Brute-force fallback
-            for (0..n) |i| {
-                for (i + 1..n) |j| {
-                    if (moversInteract(movers[i], movers[j], atoms, cutoff)) {
-                        try adj_lists[i].append(allocator, @intCast(j));
-                        try adj_lists[j].append(allocator, @intCast(i));
-                    }
-                }
+    // Every position a mover atom can take, with its owner and radius.
+    var points = std.ArrayListUnmanaged(Vec3(f32)).empty;
+    defer points.deinit(allocator);
+    var owner = std.ArrayListUnmanaged(u32).empty;
+    defer owner.deinit(allocator);
+    var radius = std.ArrayListUnmanaged(f32).empty;
+    defer radius.deinit(allocator);
+    var max_radius: f32 = 0;
+    for (movers, 0..) |m, mi| {
+        for (m.atom_indices, 0..) |ai, j| {
+            const r = atoms[ai].vdw_radius;
+            max_radius = @max(max_radius, r);
+            try appendPoint(allocator, &points, &owner, &radius, atoms[ai].pos, @intCast(mi), r);
+            for (m.orientations) |o| {
+                try appendPoint(allocator, &points, &owner, &radius, o.positions[j], @intCast(mi), r);
             }
-        },
-        else => return err,
+        }
+    }
+
+    // stamp[b] == a + 1 once the edge a-b has been recorded while visiting a.
+    const stamp = try allocator.alloc(u32, n);
+    defer allocator.free(stamp);
+    @memset(stamp, 0);
+
+    const max_reach = 2 * max_radius + contact_margin;
+    var cell_list: ?CellList = CellList.init(allocator, points.items, @max(max_reach, 1.0)) catch |err| switch (err) {
+        error.GridTooLarge, error.NonFiniteCoordinate => null,
+        error.OutOfMemory => return err,
     };
+    defer if (cell_list) |*cl| cl.deinit();
+
+    var candidates = std.ArrayListUnmanaged(u32).empty;
+    defer candidates.deinit(allocator);
+
+    // Points of one mover are contiguous, so `stamp` only needs the owner of
+    // the point being visited.
+    for (points.items, 0..) |p, pi| {
+        const a = owner.items[pi];
+        candidates.clearRetainingCapacity();
+        if (cell_list) |cl| {
+            try cl.neighborsInRadius(p, radius.items[pi] + max_radius + contact_margin, &candidates, allocator, points.items);
+        } else {
+            // Fallback when the grid would be too large: scan every point.
+            for (0..points.items.len) |qi| try candidates.append(allocator, @intCast(qi));
+        }
+        for (candidates.items) |qi| {
+            const b = owner.items[qi];
+            if (b <= a or stamp[b] == a + 1) continue;
+            const reach = radius.items[pi] + radius.items[qi] + contact_margin;
+            const d = p.sub(points.items[qi]);
+            if (d.dot(d) >= reach * reach) continue;
+            stamp[b] = a + 1;
+            try adj_lists[a].append(allocator, b);
+            try adj_lists[b].append(allocator, a);
+        }
+    }
 
     // Convert to owned slices
     const adjacency = try allocator.alloc([]u32, n);
@@ -78,91 +120,19 @@ pub fn buildInteractionGraph(
     };
 }
 
-/// CellList-accelerated inner loop for buildInteractionGraph.
-/// Returns error.GridTooLarge when CellList.init fails with that error, so the
-/// caller can fall back to brute force. Other errors are propagated normally.
-fn buildWithCellList(
+fn appendPoint(
     allocator: Allocator,
-    movers: []const Mover,
-    atoms: []const Atom,
-    cutoff: f32,
-    adj_lists: []std.ArrayListUnmanaged(u32),
+    points: *std.ArrayListUnmanaged(Vec3(f32)),
+    owner: *std.ArrayListUnmanaged(u32),
+    radius: *std.ArrayListUnmanaged(f32),
+    pos: Vec3(f32),
+    mover_idx: u32,
+    r: f32,
 ) !void {
-    const n = movers.len;
-    if (n == 0) return;
-
-    // 1. Compute centroid for each mover.
-    const centroids = try allocator.alloc(Vec3(f32), n);
-    defer allocator.free(centroids);
-
-    // Absent H atoms sit at ABSENT_H_POS and are skipped throughout; a mover
-    // with no present atom gets the origin, and moversInteract never pairs it.
-    for (movers, 0..) |mover, i| {
-        var sum = Vec3(f32){ .x = 0, .y = 0, .z = 0 };
-        var n_present: usize = 0;
-        for (mover.atom_indices) |ai| {
-            if (mover_mod.isAbsentPos(atoms[ai].pos)) continue;
-            sum = sum.add(atoms[ai].pos);
-            n_present += 1;
-        }
-        const count: f32 = @floatFromInt(@max(n_present, 1));
-        centroids[i] = Vec3(f32){
-            .x = sum.x / count,
-            .y = sum.y / count,
-            .z = sum.z / count,
-        };
-    }
-
-    // 2. Compute max_radius: the furthest any atom is from its mover's centroid.
-    var max_radius: f32 = 0.0;
-    for (movers, 0..) |mover, i| {
-        for (mover.atom_indices) |ai| {
-            if (mover_mod.isAbsentPos(atoms[ai].pos)) continue;
-            const diff = atoms[ai].pos.sub(centroids[i]);
-            const d = @sqrt(diff.dot(diff));
-            if (d > max_radius) max_radius = d;
-        }
-    }
-
-    // 3. Build CellList over mover centroids.
-    //    Query radius = cutoff + 2*max_radius covers all pairs that might interact.
-    const query_radius = cutoff + 2.0 * max_radius;
-    const cell_size = @max(query_radius, 1.0); // one cell spans the whole query radius
-
-    var cell_list = try CellList.init(allocator, centroids, cell_size);
-    defer cell_list.deinit();
-
-    // 4. For each mover i, query nearby centroids and run the detailed check.
-    var candidates = std.ArrayListUnmanaged(u32).empty;
-    defer candidates.deinit(allocator);
-
-    for (0..n) |i| {
-        candidates.clearRetainingCapacity();
-        try cell_list.neighborsInRadius(centroids[i], query_radius, &candidates, allocator, centroids);
-
-        for (candidates.items) |j_u32| {
-            const j: usize = j_u32;
-            // Only check each pair once (i < j).
-            if (j <= i) continue;
-            if (moversInteract(movers[i], movers[j], atoms, cutoff)) {
-                try adj_lists[i].append(allocator, @intCast(j));
-                try adj_lists[j].append(allocator, @intCast(i));
-            }
-        }
-    }
-}
-
-fn moversInteract(a: Mover, b: Mover, atoms: []const Atom, cutoff: f32) bool {
-    const cutoff2 = cutoff * cutoff;
-    for (a.atom_indices) |ai| {
-        if (mover_mod.isAbsentPos(atoms[ai].pos)) continue;
-        for (b.atom_indices) |bi| {
-            if (mover_mod.isAbsentPos(atoms[bi].pos)) continue;
-            const diff = atoms[ai].pos.sub(atoms[bi].pos);
-            if (diff.dot(diff) <= cutoff2) return true;
-        }
-    }
-    return false;
+    if (mover_mod.isAbsentPos(pos)) return;
+    try points.append(allocator, pos);
+    try owner.append(allocator, mover_idx);
+    try radius.append(allocator, r);
 }
 
 /// Find connected components in the interaction graph.
@@ -216,6 +186,9 @@ pub fn findCliques(allocator: Allocator, graph: *const InteractionGraph) ![][]u3
 const testing = std.testing;
 
 /// Create a minimal Mover for testing. Only atom_indices matters for interaction checks.
+/// Contact margin used by the tests (the scorer's value).
+const test_margin: f32 = 0.5;
+
 fn makeMover(allocator: Allocator, atom_indices: []const u32) !Mover {
     const indices = try allocator.dupe(u32, atom_indices);
     const orientations = try allocator.alloc(mover_mod.Orientation, 0);
@@ -239,7 +212,7 @@ test "single isolated mover forms own clique" {
     defer m0.deinit();
 
     const movers = [_]Mover{m0};
-    var graph = try buildInteractionGraph(allocator, &movers, &atoms, 6.0);
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, test_margin);
     defer graph.deinit();
 
     const cliques = try findCliques(allocator, &graph);
@@ -268,7 +241,7 @@ test "two interacting movers form one clique" {
     defer m1.deinit();
 
     const movers = [_]Mover{ m0, m1 };
-    var graph = try buildInteractionGraph(allocator, &movers, &atoms, 6.0);
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, test_margin);
     defer graph.deinit();
 
     const cliques = try findCliques(allocator, &graph);
@@ -296,7 +269,7 @@ test "two distant movers form two cliques" {
     defer m1.deinit();
 
     const movers = [_]Mover{ m0, m1 };
-    var graph = try buildInteractionGraph(allocator, &movers, &atoms, 6.0);
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, test_margin);
     defer graph.deinit();
 
     const cliques = try findCliques(allocator, &graph);
@@ -313,12 +286,12 @@ test "two distant movers form two cliques" {
 test "chain of interactions" {
     const allocator = testing.allocator;
 
-    // 3 movers: A at x=0, B at x=4 (within 6 of A), C at x=8 (within 6 of B, not of A directly)
-    // A-B distance = 4, B-C distance = 4, A-C distance = 8
+    // 3 movers 3 A apart on a line; radii 1.7, so the reach is 3.9 A.
+    // A-B and B-C are in range, A-C (6 A) is not.
     var atoms = [_]Atom{
         .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } }, // mover A
-        .{ .pos = .{ .x = 4.0, .y = 0.0, .z = 0.0 } }, // mover B
-        .{ .pos = .{ .x = 8.0, .y = 0.0, .z = 0.0 } }, // mover C
+        .{ .pos = .{ .x = 3.0, .y = 0.0, .z = 0.0 } }, // mover B
+        .{ .pos = .{ .x = 6.0, .y = 0.0, .z = 0.0 } }, // mover C
     };
 
     var m0 = try makeMover(allocator, &.{0});
@@ -329,10 +302,10 @@ test "chain of interactions" {
     defer m2.deinit();
 
     const movers = [_]Mover{ m0, m1, m2 };
-    var graph = try buildInteractionGraph(allocator, &movers, &atoms, 6.0);
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, test_margin);
     defer graph.deinit();
 
-    // Verify A-C do not directly interact (distance 8 > 6 cutoff)
+    // Verify A-C do not directly interact (distance 6 > 3.9 reach)
     try testing.expectEqual(@as(usize, 1), graph.adjacency[0].len); // A only connects to B
     try testing.expectEqual(@as(usize, 2), graph.adjacency[1].len); // B connects to A and C
 
@@ -365,7 +338,7 @@ test "absent H atoms do not connect distant movers" {
     defer m1.deinit();
 
     const movers = [_]Mover{ m0, m1 };
-    var graph = try buildInteractionGraph(allocator, &movers, &atoms, 6.0);
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, test_margin);
     defer graph.deinit();
 
     const cliques = try findCliques(allocator, &graph);
@@ -375,4 +348,50 @@ test "absent H atoms do not connect distant movers" {
     }
 
     try testing.expectEqual(@as(usize, 2), cliques.len);
+}
+
+test "movers just beyond scoring range do not interact" {
+    const allocator = testing.allocator;
+
+    // Radii 1.7 + 1.7 + margin 0.5 = 3.9 A; 4.0 A apart is out of range.
+    var atoms = [_]Atom{
+        .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } },
+        .{ .pos = .{ .x = 4.0, .y = 0.0, .z = 0.0 } },
+    };
+    var m0 = try makeMover(allocator, &.{0});
+    defer m0.deinit();
+    var m1 = try makeMover(allocator, &.{1});
+    defer m1.deinit();
+
+    const movers = [_]Mover{ m0, m1 };
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, test_margin);
+    defer graph.deinit();
+    try testing.expectEqual(@as(usize, 0), graph.adjacency[0].len);
+}
+
+test "movers interact through a non-current orientation" {
+    const allocator = testing.allocator;
+
+    // Mover 0 sits 10 A from mover 1, but one of its orientations reaches
+    // within 3 A of it.
+    var atoms = [_]Atom{
+        .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } },
+        .{ .pos = .{ .x = 10.0, .y = 0.0, .z = 0.0 } },
+    };
+    var positions = [_]Vec3(f32){ .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 7.0, .y = 0.0, .z = 0.0 } };
+    var orientations = [_]mover_mod.Orientation{ .{ .positions = positions[0..1] }, .{ .positions = positions[1..2] } };
+    const m0 = Mover{
+        .kind = .single_h_rotator,
+        .residue_idx = 0,
+        .atom_indices = @constCast(&[_]u32{0}),
+        .orientations = &orientations,
+        .allocator = allocator,
+    };
+    var m1 = try makeMover(allocator, &.{1});
+    defer m1.deinit();
+
+    const movers = [_]Mover{ m0, m1 };
+    var graph = try buildInteractionGraph(allocator, &movers, &atoms, test_margin);
+    defer graph.deinit();
+    try testing.expectEqual(@as(usize, 1), graph.adjacency[0].len);
 }
