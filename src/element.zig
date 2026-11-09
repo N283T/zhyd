@@ -25,6 +25,7 @@ pub const MoverHint = enum(u3) {
     rotate_nh2, // NH2 (N-terminal PRO NH2+, neutral primary amine)
     flip_amide, // Asn/Gln
     flip_his, // His
+    flip_carboxyl, // protonated Asp/Glu (proton on either oxygen)
 };
 
 pub const AtomTypeInfo = struct {

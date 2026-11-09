@@ -61,6 +61,7 @@ zhyd run input.cif -o output.cif --validate
 zhyd run input.cif -o output.cif --json log.json
 zhyd run input.cif -o output.cif --state-json protonation-state.json
 zhyd run input.cif -o output.cif --protonation protonation.txt
+zhyd run input.cif -o output.cif --ph 7.0   # states from predicted pKa (experimental)
 zhyd run input.cif --dump-movers movers.txt --no-opt
 zhyd run input.cif -o output.cif --fix fix.txt
 
@@ -100,6 +101,7 @@ Common `run` and `batch` options:
 | `--json PATH` / `--jsonl PATH` | Single-file JSON log / batch JSONL log |
 | `--state-json PATH` | Applied residue state/formal-charge sidecar (`run` only) |
 | `--protonation PATH` | Residue protonation override file |
+| `--ph VALUE` | Protonation states from predicted pKa at this pH (experimental; overrides win) |
 | `--fix PATH` | Force mover states from a control file |
 | `--no-opt` | Skip optimization |
 | `--no-flip` | Disable Asn/Gln/His flips |
@@ -151,15 +153,21 @@ D:5 CYS THIOLATE
 Supported states:
 
 - `HIS`: `AUTO`, `HID`, `HIE`, `HIP`
-- `ASP`: `DEPROTONATED`, `OD1`, `OD2`
-- `GLU`: `DEPROTONATED`, `OE1`, `OE2`
+- `ASP`: `DEPROTONATED`, `OD1`, `OD2`, `PROTONATED` (optimizer picks the oxygen)
+- `GLU`: `DEPROTONATED`, `OE1`, `OE2`, `PROTONATED` (optimizer picks the oxygen)
 - `LYS`: `CHARGED`, `NEUTRAL`
 - `CYS`: `THIOL`, `THIOLATE`
 
 Applied state reports and experimental pKa reports use the versioned
-`zhyd.protonation.v1` schema in `docs/schema/`. The pKa model is not yet
-validated for production charge assignment and intentionally does not expose a
-`--ph` coordinate-assignment option.
+`zhyd.protonation.v1` schema in `docs/schema/`.
+
+`run --ph VALUE` applies the macrostates implied by the empirical engine's
+pKa at that pH: HIS → HIP, ASP/GLU → protonated, LYS → neutral and CYS →
+thiolate when the predicted pKa crosses the pH (TYR, ARG and termini keep
+their defaults). The optimizer still picks tautomers, ring flips and the
+protonated carboxyl oxygen; `--protonation` entries win. It is experimental:
+see [Phase 4](docs/specs/zhyd-protonation-pka.md) for the rule and its
+evaluation.
 
 With `-Dpropka=true`, `pka` uses PROPKA 3.5.1 by default (`--engine propka`).
 Its values match `propka3` run on the same structure to the two decimals
@@ -202,7 +210,10 @@ B:14 SER OG 6
 Targets and values:
 
 - `amide`: `ORIGINAL`, `FLIP`
-- `his`: `HIE`, `HID`, `HIE_FLIP`, `HID_FLIP`
+- `his`: `HIE`, `HID`, `HIE_FLIP`, `HID_FLIP`; for a pKa-derived HIP, `0`
+  (original ring) or `1` (flipped)
+- `carboxyl` (protonated Asp/Glu with `PROTONATED`): `0` (H on OD1/OE1) or
+  `1` (H on OD2/OE2)
 - rotators: center atom name plus coarse orientation index, for example `SER OG 6`
 
 ## Changelog

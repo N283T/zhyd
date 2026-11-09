@@ -19,6 +19,8 @@ const lookup = @import("lookup.zig");
 const terminal = @import("terminal.zig");
 
 const Vec3f32 = math_mod.Vec3(f32);
+const MoverHint = element.MoverHint;
+const ABSENT_H_POS = @import("../optimize/mover.zig").Mover.ABSENT_H_POS;
 const ParentMeta = lookup.ParentMeta;
 const findAtom = lookup.findAtom;
 const findAtomPos = lookup.findAtomPos;
@@ -82,15 +84,17 @@ pub fn placeOverrideHydrogen(mdl: *Model, res: Residue, res_idx: u32, target_alt
     if (std.mem.eql(u8, comp_id, "ASP") and s == .asp) {
         return switch (s.asp) {
             .deprotonated => null,
-            .atom1 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OD1", "OD2", "CG", "HD1"),
-            .atom2 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OD2", "OD1", "CG", "HD2"),
+            .atom1 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OD1", "OD2", "CG", "HD1", .none),
+            .atom2 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OD2", "OD1", "CG", "HD2", .none),
+            .protonated => try placeFlippableCarboxyl(mdl, res, res_idx, target_altloc, mode, .{ "OD1", "OD2", "CG", "HD1", "HD2" }),
         };
     }
     if (std.mem.eql(u8, comp_id, "GLU") and s == .glu) {
         return switch (s.glu) {
             .deprotonated => null,
-            .atom1 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OE1", "OE2", "CD", "HE1"),
-            .atom2 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OE2", "OE1", "CD", "HE2"),
+            .atom1 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OE1", "OE2", "CD", "HE1", .none),
+            .atom2 => try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, "OE2", "OE1", "CD", "HE2", .none),
+            .protonated => try placeFlippableCarboxyl(mdl, res, res_idx, target_altloc, mode, .{ "OE1", "OE2", "CD", "HE1", "HE2" }),
         };
     }
     return null;
@@ -106,6 +110,7 @@ fn placeCarboxylHydrogen(
     partner_o_name: []const u8,
     carbon_name: []const u8,
     h_name: []const u8,
+    hint: MoverHint,
 ) !PlaceResult {
     const protonated_o = findAtom(mdl, res, padName(protonated_o_name), target_altloc) orelse return .missing_parent;
     if (protonated_o.flags.bonded_inter_residue) return .inter_residue;
@@ -125,8 +130,29 @@ fn placeCarboxylHydrogen(
         bond_policy.adjustedBondLength(mode, 0.97, protonated_o.element_type, .Hpol),
         0.0,
     );
-    try appendHydrogenNamed(mdl, h_pos.cast(f32), h_name, .Hpol, .none, res_idx, meta);
+    try appendHydrogenNamed(mdl, h_pos.cast(f32), h_name, .Hpol, hint, res_idx, meta);
     return .placed;
+}
+
+/// Protonated acid with the oxygen left open: H on the first oxygen (syn)
+/// and a second H on the other oxygen at the absent sentinel. The carboxyl
+/// flip mover chooses between them; without optimization the first stays.
+fn placeFlippableCarboxyl(
+    mdl: *Model,
+    res: Residue,
+    res_idx: u32,
+    target_altloc: u8,
+    mode: bond_policy.BondLengthMode,
+    names: [5][]const u8, // O1, O2, C, H on O1, H on O2
+) !PlaceResult {
+    const first = try placeCarboxylHydrogen(mdl, res, res_idx, target_altloc, mode, names[0], names[1], names[2], names[3], .flip_carboxyl);
+    if (first != .placed) return first;
+    const other_o = findAtom(mdl, res, padName(names[1]), target_altloc) orelse return first;
+    var meta = ParentMeta.fromAtom(other_o);
+    if (target_altloc != ' ') meta.altloc = target_altloc;
+    if (existsInResidue(mdl, res, padName(names[4]), meta.altloc)) return first;
+    try appendHydrogenNamed(mdl, ABSENT_H_POS, names[4], .Hpol, .flip_carboxyl, res_idx, meta);
+    return first;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

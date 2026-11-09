@@ -398,3 +398,47 @@ test "real-file pka: 2cf8 PROPKA engine matches PROPKA 3.5.1" {
     try testing.expectEqual(@as(usize, 8), n_disulfide);
     for (result.sites) |site| try testing.expect(site.kind != .cys);
 }
+
+// ============================================================
+// pH-driven protonation states (run --ph)
+// ============================================================
+
+/// Run `processFile` on 1L2Y model 1 at `ph` and return the state report.
+fn runAtPh(allocator: std.mem.Allocator, tmp: *std.testing.TmpDir, ph: f32) ![]u8 {
+    const io = std.testing.io;
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(dir);
+    const out_cif = try std.fmt.allocPrint(allocator, "{s}/out.cif", .{dir});
+    defer allocator.free(out_cif);
+    const state_json = try std.fmt.allocPrint(allocator, "{s}/state.json", .{dir});
+    defer allocator.free(state_json);
+    _ = try zhyd.run.processFile(allocator, .{
+        .input_path = "examples/data/1L2Y.cif.gz",
+        .output_path = out_cif,
+        .state_json_path = state_json,
+        .format = .mmcif,
+        .model_filter = .first,
+        .strip_h = true,
+        .quiet = true,
+        .ph = ph,
+    });
+    return tmp.dir.readFileAlloc(io, "state.json", allocator, .limited(1 << 20));
+}
+
+test "real-file ph: 1L2Y states follow the pH and record their source" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Trp-cage: Lys8 and Asp9. At pH 0 Asp9 is protonated (oxygen chosen by
+    // the optimizer); at pH 14 Lys8 is neutral. Both come from the pKa.
+    const acid = try runAtPh(testing.allocator, &tmp, 0.0);
+    defer testing.allocator.free(acid);
+    try testing.expect(std.mem.find(u8, acid, "\"site\": \"ASP\"}, \"state\": {\"macrostate\": \"protonated_neutral\"") != null);
+    try testing.expect(std.mem.find(u8, acid, "\"source\": \"pka_predicted\"") != null);
+    try testing.expect(std.mem.find(u8, acid, "\"site\": \"LYS\"}, \"state\": {\"macrostate\": \"protonated_cation\"") != null);
+
+    const base = try runAtPh(testing.allocator, &tmp, 14.0);
+    defer testing.allocator.free(base);
+    try testing.expect(std.mem.find(u8, base, "\"site\": \"LYS\"}, \"state\": {\"macrostate\": \"neutral\"") != null);
+    try testing.expect(std.mem.find(u8, base, "\"site\": \"ASP\"}, \"state\": {\"macrostate\": \"deprotonated_anion\"") != null);
+}

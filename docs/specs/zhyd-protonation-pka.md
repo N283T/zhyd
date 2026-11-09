@@ -5,7 +5,8 @@ Status: three pKa engines. PROPKA 3.5.1 via the optional zpropka port
 engine (zhyd mode `zhyd-empirical-v1.3`, the default engine without
 PROPKA; parity mode `zhyd-empirical-v1-parity`), and the earlier experimental
 built-in model (`zhyd-pka-protein-v0.2`, fitted, not accepted for
-production). Schema v1.
+production). Schema v1. pH-driven state application (`run --ph`, Phase 4)
+is implemented as an experimental opt-in.
 
 ## Scope and constraints
 
@@ -104,9 +105,9 @@ This phase preserves those modules and adds a parallel pKa/state boundary
 | Flip/rotamer/water optimization | placed alternatives and scorer | orientation | intrinsic pKa |
 
 The experimental `pka` command reports a recommended state at a documented
-reference pH of 7.0 but sets `applies_to_coordinates=false`. It deliberately has
-no `--ph`: pH-driven coordinate assignment will not be exposed until prediction
-accuracy and state application are validated together.
+reference pH of 7.0 but sets `applies_to_coordinates=false`. Coordinates
+follow predicted states only under `run --ph` (Phase 4 below), which applies
+the same rule at the requested pH.
 
 ## Protein pKa model (parameters v0.2)
 
@@ -298,11 +299,66 @@ PROPKA's test error is dominated by a few CYS (test CYS MAE 15, including a
   and thresholds chosen before that holdout is scored. Suggested gate: held-out
   MAE at least 0.1 below the null model and buried-site MAE below 1.5.
 
-### Phase 4 — pH-driven state application (not started)
+### Phase 4 — pH-driven state application (experimental, opt-in)
 
-- Requires accepted Phase 2/3 thresholds, explicit user opt-in, state-to-
-  placement integration tests for every supported kind, and charge/H-coordinate
-  consistency validation. Only then may a `--ph` assignment interface be added.
+`run --ph VALUE` (and `batch --ph`) runs the empirical engine in zhyd mode on
+each model and applies the macrostates it implies before placement. Without
+`--ph` placement is unchanged (27 example and literature structures give
+byte-identical output).
+
+**Why it is needed.** The optimizer never chooses a charge: the His flipper
+offers HID and HIE only (dot scoring has no charge or desolvation cost, so HIP
+would win everywhere), and Asp/Glu/Lys/Cys keep their default charges. The
+pKa is the only source of non-default macrostates.
+
+**Rule.** A site is protonated when its predicted pKa is at or above the pH
+(the `pka` report's recommended-state rule). Only non-default states become
+overrides: HIS → HIP; ASP/GLU → protonated; LYS → neutral; CYS → thiolate.
+TYR (worse than the model-pKa baseline on the fitting rows), ARG and the
+termini keep their defaults. Non-physical pKa values are ignored. User
+overrides (`--protonation`) win over predicted states.
+
+No margin around the pH and no confidence gate. Both were checked on the
+fitting rows (PKAD-R + external set, v1.3 predictions, pH 7) before the
+literature set was scored. Every margin from 0.5 to 2 and the
+"confidence not low" filter lowered the net gain, because most correct
+non-default calls are buried, low-confidence sites:
+
+| Kind | Non-default calls right − wrong (margin 0) | margin 0.5 | not-low only |
+|---|---|---|---|
+| HIS | 22 − 12 | 12 − 4 | 16 − 8 |
+| CYS | 17 − 6 | 14 − 5 | 8 − 5 |
+| ASP | 4 − 2 | 1 − 1 | 0 − 0 |
+| GLU | 4 − 6 | 3 − 5 | 0 − 0 |
+| LYS | 1 − 0 | 0 − 0 | 0 − 0 |
+
+**Division of labour.** The pKa sets only the charge. A pKa-derived HIP keeps
+a two-orientation ring flip (both H, flipped or not); a user's HIP still pins
+the ring. A protonated acid places H on the first oxygen and a second H on
+the other oxygen at the absent sentinel; a carboxyl flip mover
+(`carboxyl_flip`, two orientations, syn H only) picks the oxygen, and
+without optimization the first oxygen keeps it. The same `PROTONATED` state
+is available in override files. `--state-json` reports these sites with
+source `pka_predicted` and the chosen tautomer or oxygen.
+
+**State agreement at pH 7** (sites whose experimental pKa is on the same
+side of 7 as the applied state):
+
+| Set | Default states | `--ph 7` |
+|---|---|---|
+| Fitting rows, HIS/ASP/GLU/LYS/CYS (841) | 734 | 756 |
+| Literature set 2026-11 (38) | 38 | 35 |
+
+The fitting-row gain is in-sample for CYS and HIS (their parameters were
+fitted on these rows). The literature set is mostly His with pKa below 7, so
+the default is always right there and only losses can show: LCC-ICCG His242
+in two structures and HCA II His107 (the acid–base pair threshold, see the
+empirical engine specification). The states applied by `run --ph 7` agree
+with the `pka` report's recommended states at every one of 659 compared
+sites.
+
+Open: anti carboxylic acid conformers; ensemble or microstate treatment of
+coupled sites (Phase 5); the acid–base pair threshold (Q9 candidate).
 
 ### Phase 5 — microstates and new chemistries (not started)
 

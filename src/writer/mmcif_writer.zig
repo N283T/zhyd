@@ -757,6 +757,7 @@ pub fn writeZhydLog(
             .single_h_rotator, .nh3_rotator, .nh2_rotator => "rotate",
             .amide_flip => "flip_amide",
             .his_flip => "flip_his",
+            .carboxyl_flip => "flip_carboxyl",
         };
         try writer.print("{s}.{s}.{d} {s} {d} .\n", .{
             chain.labelSlice(),

@@ -17,6 +17,9 @@ pub const ReportModel = struct {
 pub const StateReportModel = struct {
     model_num: u32,
     model: *const model_mod.Model,
+    /// This model's effective overrides (user entries plus pKa-derived
+    /// states under `run --ph`); null uses the report-wide overrides.
+    overrides: ?*const protonation.ProtonationOverrides = null,
 };
 
 pub fn writeStateReport(
@@ -49,7 +52,7 @@ pub fn writeStateReport(
             if (kind) |k| {
                 if (!first) try writer.writeAll(",\n");
                 first = false;
-                try writeAppliedSite(writer, entry.model, @intCast(res_idx), k, overrides, nterm_mode, metals);
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), k, entry.overrides orelse overrides, nterm_mode, metals);
             }
             const chain = entry.model.chains.items[res.chain_idx];
             const is_nterm = res_idx == chain.residue_start or
@@ -59,12 +62,12 @@ pub fn writeStateReport(
             if (is_nterm) {
                 if (!first) try writer.writeAll(",\n");
                 first = false;
-                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .n_term, overrides, nterm_mode, metals);
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .n_term, entry.overrides orelse overrides, nterm_mode, metals);
             }
             if (is_cterm) {
                 if (!first) try writer.writeAll(",\n");
                 first = false;
-                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .c_term, overrides, nterm_mode, metals);
+                try writeAppliedSite(writer, entry.model, @intCast(res_idx), .c_term, entry.overrides orelse overrides, nterm_mode, metals);
             }
         }
         try writer.writeAll("\n    ]}");
@@ -128,7 +131,12 @@ fn appliedState(
     nterm_mode: terminal.NtermMode,
     metals: []const math.Vec3(f32),
 ) AppliedState {
-    const override_state = if (overrides) |value| value.find(mdl, residue_idx) else null;
+    const override_entry = if (overrides) |value| value.findEntry(mdl, residue_idx) else null;
+    const override_state: ?protonation.ResidueState = if (override_entry) |e| e.state else null;
+    const source: []const u8 = if (override_entry) |e| switch (e.source) {
+        .user => "user_override",
+        .pka => "pka_predicted",
+    } else "user_override";
 
     // A covalently bonded SG (cystine or covalent adduct) has no titratable
     // proton; a thiol/thiolate override cannot apply and is reported rather
@@ -147,21 +155,21 @@ fn appliedState(
 
     if (override_state) |value| switch (value) {
         .his => |his| if (kind == .his and his != .auto) return switch (his) {
-            .hid => .{ .macrostate = "neutral", .tautomer = "HID", .charge = 0, .source = "user_override" },
-            .hie => .{ .macrostate = "neutral", .tautomer = "HIE", .charge = 0, .source = "user_override" },
-            .hip => .{ .macrostate = "protonated_cation", .tautomer = "HIP", .charge = 1, .source = "user_override" },
+            .hid => .{ .macrostate = "neutral", .tautomer = "HID", .charge = 0, .source = source },
+            .hie => .{ .macrostate = "neutral", .tautomer = "HIE", .charge = 0, .source = source },
+            .hip => .{ .macrostate = "protonated_cation", .tautomer = "HIP", .charge = 1, .source = source },
             .auto => unreachable,
         },
-        .asp => |acid| if (kind == .asp) return acidAppliedState(acid, "OD1", "OD2"),
-        .glu => |acid| if (kind == .glu) return acidAppliedState(acid, "OE1", "OE2"),
+        .asp => |acid| if (kind == .asp) return acidAppliedState(mdl, residue_idx, acid, "OD1", "OD2", source),
+        .glu => |acid| if (kind == .glu) return acidAppliedState(mdl, residue_idx, acid, "OE1", "OE2", source),
         .lys => |lys| if (kind == .lys) return if (lys == .charged)
-            .{ .macrostate = "protonated_cation", .charge = 1, .source = "user_override" }
+            .{ .macrostate = "protonated_cation", .charge = 1, .source = source }
         else
-            .{ .macrostate = "neutral", .charge = 0, .source = "user_override" },
+            .{ .macrostate = "neutral", .charge = 0, .source = source },
         .cys => |cys| if (kind == .cys) return if (cys == .thiol)
-            .{ .macrostate = "protonated_neutral", .charge = 0, .source = "user_override" }
+            .{ .macrostate = "protonated_neutral", .charge = 0, .source = source }
         else
-            .{ .macrostate = "deprotonated_anion", .charge = -1, .source = "user_override" },
+            .{ .macrostate = "deprotonated_anion", .charge = -1, .source = source },
     };
 
     return switch (kind) {
@@ -177,11 +185,18 @@ fn appliedState(
     };
 }
 
-fn acidAppliedState(state: protonation.AcidState, atom1: []const u8, atom2: []const u8) AppliedState {
+fn acidAppliedState(mdl: *const model_mod.Model, residue_idx: u32, state: protonation.AcidState, atom1: []const u8, atom2: []const u8, source: []const u8) AppliedState {
     return switch (state) {
-        .deprotonated => .{ .macrostate = "deprotonated_anion", .charge = -1, .source = "user_override" },
-        .atom1 => .{ .macrostate = "protonated_neutral", .tautomer = atom1, .charge = 0, .source = "user_override" },
-        .atom2 => .{ .macrostate = "protonated_neutral", .tautomer = atom2, .charge = 0, .source = "user_override" },
+        .deprotonated => .{ .macrostate = "deprotonated_anion", .charge = -1, .source = source },
+        .atom1 => .{ .macrostate = "protonated_neutral", .tautomer = atom1, .charge = 0, .source = source },
+        .atom2 => .{ .macrostate = "protonated_neutral", .tautomer = atom2, .charge = 0, .source = source },
+        // The optimizer chose the oxygen: read it from the placed H.
+        .protonated => .{
+            .macrostate = "protonated_neutral",
+            .tautomer = if (hydrogenPresent(mdl, residue_idx, if (atom1[1] == 'D') "HD1" else "HE1")) atom1 else atom2,
+            .charge = 0,
+            .source = source,
+        },
     };
 }
 

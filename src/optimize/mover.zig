@@ -13,7 +13,8 @@ pub const MoverKind = enum(u4) {
     nh3_rotator, // NH3+ — 3 orientations (120° spacing)
     nh2_rotator, // NH2 (non-PRO neutral N-term, PRO NH2+) — 12 orientations at 30°
     amide_flip, // Asn/Gln — 2 orientations (original + O↔N swap)
-    his_flip, // His — 6 orientations (2 flip × 3 protonation)
+    his_flip, // His — 4 orientations (2 flip × HID/HIE), or 2 (flip) for HIP
+    carboxyl_flip, // protonated Asp/Glu — 2 orientations (H on either oxygen)
 };
 
 pub const Orientation = struct {
