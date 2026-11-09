@@ -165,7 +165,14 @@ pub fn parseString(allocator: std.mem.Allocator, source: []const u8) !FixOverrid
     return .{ .allocator = allocator, .entries = try entries.toOwnedSlice(allocator) };
 }
 
+/// Lock each mover named by a fix entry. Entries that match no mover (a typo,
+/// a group that has no mover such as a methyl, or a residue absent from this
+/// model) are reported with a warning and otherwise ignored.
 pub fn applyFixes(overrides: *const FixOverrides, mdl: *const Model, movers: []Mover) !void {
+    const matched = try overrides.allocator.alloc(bool, overrides.entries.len);
+    defer overrides.allocator.free(matched);
+    @memset(matched, false);
+
     for (movers) |*m| {
         const res = mdl.residues.items[m.residue_idx];
         var i = overrides.entries.len;
@@ -175,6 +182,7 @@ pub fn applyFixes(overrides: *const FixOverrides, mdl: *const Model, movers: []M
             if (!entry.selector.matches(mdl, m)) continue;
             if (!std.mem.eql(u8, entry.compIdSlice(), res.compIdSlice())) continue;
             if (!std.mem.eql(u8, moverTargetName(mdl, m), entry.target)) continue;
+            matched[i] = true;
             if (entryOrientation(m, entry.value)) |idx| {
                 m.lockToOrientation(idx);
             } else {
@@ -189,6 +197,16 @@ pub fn applyFixes(overrides: *const FixOverrides, mdl: *const Model, movers: []M
             }
             break;
         }
+    }
+
+    for (overrides.entries, matched) |*entry, hit| {
+        if (hit) continue;
+        std.log.warn("fix override for {s}:{d} {s} {s} matches no mover; ignored", .{
+            entry.selector.chain_id,
+            entry.selector.auth_seq_id,
+            entry.compIdSlice(),
+            entry.target,
+        });
     }
 }
 
@@ -466,4 +484,31 @@ test "fixed mover preserved through optimize()" {
     // Orientation must be preserved after optimization
     try testing.expect(movers[0].is_fixed);
     try testing.expectEqual(@as(u16, 3), movers[0].best_orientation);
+}
+
+test "applyFixes ignores an entry that matches no mover" {
+    const source = @embedFile("../test_data/tiny.cif");
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    mdl.residues.items[0].auth_seq_id = 1;
+
+    place.applyChemistry(&mdl);
+    _ = try place.addHydrogens(&mdl, null, null);
+    const gen = try optimize.generateMovers(testing.allocator, &mdl, false, null, null, null, .neutron);
+    const movers = gen.movers;
+    defer {
+        for (movers) |*m| m.deinit();
+        testing.allocator.free(movers);
+    }
+
+    // The ALA CB methyl has no mover; the N-terminal NH3+ does.
+    var overrides = try parseString(testing.allocator,
+        \\A:1 ALA CB 1
+        \\A:1 ALA N 2
+    );
+    defer overrides.deinit();
+    try applyFixes(&overrides, &mdl, movers);
+
+    try testing.expect(movers[0].is_fixed);
+    try testing.expectEqual(@as(u16, 2), movers[0].best_orientation);
 }
