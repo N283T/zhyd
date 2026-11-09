@@ -12,6 +12,8 @@ const PlacementPlan = standard.PlacementPlan;
 const PlacementType = standard.PlacementType;
 const MoverHint = standard.MoverHint;
 const element_mod = @import("../element.zig");
+const math_mod = @import("../math.zig");
+const Vec3 = math_mod.Vec3;
 
 // ---------------------------------------------------------------------------
 // Bond analysis types
@@ -312,14 +314,17 @@ fn deriveSinglePlan(
             if (bond_info.heavy_neighbor_count >= 2) {
                 // H2XR2: 2 heavy neighbors, dihedral-controlled
                 if (findHeavyNeighborNamesFiltered(component, heavy_idx, 2, existing_atom_names)) |refs| {
-                    const dihedral = estimateDihedral(component, h_atom, heavy_idx, refs[0]);
+                    // Placed as h3xr with the second neighbor as explicit dihedral
+                    // reference, so execution does not have to rediscover it.
+                    // Two H on a tetrahedral center sit at +-120 deg from it.
+                    const g = dihedralGeometry(component, h_atom, heavy_idx, heavy_atom, refs[0], refs[1], 109.5, &.{ 120.0, -120.0 });
                     return PlacementPlan{
                         .h_name = h_atom.name,
-                        .placement_type = .h2xr2,
-                        .connected = .{ heavy_atom.name, refs[0], blank },
+                        .placement_type = .h3xr,
+                        .connected = .{ heavy_atom.name, refs[0], refs[1] },
                         .bond_len = bond_len,
-                        .angle = 109.5,
-                        .dihedral = dihedral,
+                        .angle = g.angle,
+                        .dihedral = g.dihedral,
                         .atom_type = atom_type,
                     };
                 }
@@ -329,14 +334,15 @@ fn deriveSinglePlan(
                 // H3XR: dihedral-controlled (e.g., methyl, or backbone H with inter-residue bond)
                 const refs = findHeavyNeighborNamesFiltered(component, heavy_idx, 1, existing_atom_names) orelse return null;
                 const second_ref = findSecondReferenceFiltered(component, heavy_idx, refs[0], existing_atom_names) orelse return null;
-                const dihedral = estimateDihedralFromIdeal(component, h_atom, heavy_atom, refs[0]);
+                // Up to three H staggered around the X-R bond.
+                const g = dihedralGeometry(component, h_atom, heavy_idx, heavy_atom, refs[0], second_ref, 109.5, &.{ 180.0, 60.0, -60.0 });
                 return PlacementPlan{
                     .h_name = h_atom.name,
                     .placement_type = .h3xr,
                     .connected = .{ heavy_atom.name, refs[0], second_ref },
                     .bond_len = bond_len,
-                    .angle = 109.5,
-                    .dihedral = dihedral,
+                    .angle = g.angle,
+                    .dihedral = g.dihedral,
                     .atom_type = atom_type,
                     .mover_hint = if (bond_info.h_neighbor_count >= 3) .rotate_methyl else mover_hint,
                 };
@@ -361,14 +367,15 @@ fn deriveSinglePlan(
                 // Only one heavy neighbor on sp2 — use dihedral placement
                 const refs = findHeavyNeighborNamesFiltered(component, heavy_idx, 1, existing_atom_names) orelse return null;
                 const second_ref = findSecondReferenceFiltered(component, heavy_idx, refs[0], existing_atom_names) orelse return null;
-                const dihedral = estimateDihedralFromIdeal(component, h_atom, heavy_atom, refs[0]);
+                // In the plane of X, R and R2 (e.g. both H of a terminal =CH2).
+                const g = dihedralGeometry(component, h_atom, heavy_idx, heavy_atom, refs[0], second_ref, 120.0, &.{ 180.0, 0.0 });
                 return PlacementPlan{
                     .h_name = h_atom.name,
                     .placement_type = .h3xr,
                     .connected = .{ heavy_atom.name, refs[0], second_ref },
                     .bond_len = bond_len,
-                    .angle = 120.0,
-                    .dihedral = dihedral,
+                    .angle = g.angle,
+                    .dihedral = g.dihedral,
                     .atom_type = atom_type,
                 };
             }
@@ -460,26 +467,65 @@ fn findSecondReferenceFiltered(component: *const ccd.Component, heavy_idx: u16, 
     return null;
 }
 
-/// Estimate dihedral angle for H placement from ideal coordinates.
-/// TODO: Implement actual dihedral computation from CCD ideal coordinates.
-/// Currently returns a fixed heuristic value (120.0 degrees).
-fn estimateDihedral(component: *const ccd.Component, h_atom: ccd.CompAtom, heavy_idx: u16, ref_name: [4]u8) f32 {
-    _ = component;
-    _ = h_atom;
-    _ = heavy_idx;
-    _ = ref_name;
-    return 120.0;
+/// Bond angle and dihedral for an `h3xr` plan placing `h_atom` on `heavy`
+/// (connected = heavy, r, r2).
+///
+/// When the component has ideal coordinates for all four atoms they are
+/// measured there, in the convention of `geometry.placeH3XR`: angle is
+/// H-X-R and dihedral is minus the H-X-R-R2 torsion. Otherwise the H gets
+/// `fallback_dihedrals[k]`, k being its rank among the H on the same heavy
+/// atom, so that several H on one atom never share a position.
+fn dihedralGeometry(
+    component: *const ccd.Component,
+    h_atom: ccd.CompAtom,
+    heavy_idx: u16,
+    heavy: ccd.CompAtom,
+    r: [4]u8,
+    r2: [4]u8,
+    fallback_angle: f32,
+    fallback_dihedrals: []const f32,
+) struct { angle: f32, dihedral: f32 } {
+    if (idealPos(h_atom)) |h| if (idealPos(heavy)) |x| {
+        if (atomByName(component, r)) |ra| if (idealPos(ra)) |rp| {
+            if (atomByName(component, r2)) |r2a| if (idealPos(r2a)) |r2p| {
+                return .{
+                    .angle = @floatCast(math_mod.angle(f64, h, x, rp)),
+                    .dihedral = @floatCast(-math_mod.dihedralAngle(f64, h, x, rp, r2p)),
+                };
+            };
+        };
+    };
+    const k = hRank(component, heavy_idx, h_atom.name);
+    return .{ .angle = fallback_angle, .dihedral = fallback_dihedrals[k % fallback_dihedrals.len] };
 }
 
-/// Estimate dihedral from ideal coordinates of the H and heavy atoms.
-/// TODO: Implement actual dihedral computation from CCD ideal coordinates.
-/// Currently returns a fixed heuristic value (180.0 degrees).
-fn estimateDihedralFromIdeal(component: *const ccd.Component, h_atom: ccd.CompAtom, heavy_atom: ccd.CompAtom, ref_name: [4]u8) f32 {
-    _ = component;
-    _ = h_atom;
-    _ = heavy_atom;
-    _ = ref_name;
-    return 180.0;
+/// Ideal position of a component atom, or null when the component has none
+/// (all coordinates zero: missing in the CCD entry, or not provided by the
+/// source of the component).
+fn idealPos(a: ccd.CompAtom) ?Vec3(f64) {
+    if (a.ideal_x == 0 and a.ideal_y == 0 and a.ideal_z == 0) return null;
+    return .{ .x = a.ideal_x, .y = a.ideal_y, .z = a.ideal_z };
+}
+
+fn atomByName(component: *const ccd.Component, name: [4]u8) ?ccd.CompAtom {
+    for (component.atoms) |a| {
+        if (std.mem.eql(u8, &a.name, &name)) return a;
+    }
+    return null;
+}
+
+/// Rank of the H named `h_name` among the H bonded to `heavy_idx`, in bond order.
+fn hRank(component: *const ccd.Component, heavy_idx: u16, h_name: [4]u8) usize {
+    var k: usize = 0;
+    for (component.bonds) |bond| {
+        const ni: ?u16 = if (bond.atom_idx_1 == heavy_idx) bond.atom_idx_2 else if (bond.atom_idx_2 == heavy_idx) bond.atom_idx_1 else null;
+        const idx = ni orelse continue;
+        const a = component.atoms[idx];
+        if (a.element_symbol[0] != 'H') continue;
+        if (std.mem.eql(u8, &a.name, &h_name)) return k;
+        k += 1;
+    }
+    return k;
 }
 
 // ---------------------------------------------------------------------------
@@ -687,4 +733,48 @@ test "analyzeBonds demotes sp2 to sp3 on valence overflow" {
     const info_overflow = analyzeBonds(&comp, 0, 1, 0);
     try testing.expectEqual(Hybridization.sp3, info_overflow.hybridization);
     try testing.expectEqual(@as(u8, 3), info_overflow.heavy_neighbor_count); // 2 template + 1 extra
+}
+
+test "dihedrals from ideal coordinates reproduce the ideal H positions" {
+    const geometry = @import("geometry.zig");
+    // Ethanol-like: C1 methyl (3 H) bonded to C2 (2 H) bonded to O1.
+    // Ideal coordinates from a staggered geometry.
+    var atoms = [_]ccd.CompAtom{
+        .{ .name = .{ 'C', '1', ' ', ' ' }, .name_len = 2, .element_symbol = .{ 'C', ' ' }, .ideal_x = -1.2, .ideal_y = 0.1, .ideal_z = 0.3 },
+        .{ .name = .{ 'C', '2', ' ', ' ' }, .name_len = 2, .element_symbol = .{ 'C', ' ' }, .ideal_x = 0.29, .ideal_y = -0.1, .ideal_z = 0.05 },
+        .{ .name = .{ 'O', '1', ' ', ' ' }, .name_len = 2, .element_symbol = .{ 'O', ' ' }, .ideal_x = 0.95, .ideal_y = 1.12, .ideal_z = 0.2 },
+        .{ .name = .{ 'H', '1', '1', ' ' }, .name_len = 3, .element_symbol = .{ 'H', ' ' }, .ideal_x = -1.67, .ideal_y = -0.84, .ideal_z = 0.05 },
+        .{ .name = .{ 'H', '1', '2', ' ' }, .name_len = 3, .element_symbol = .{ 'H', ' ' }, .ideal_x = -1.6, .ideal_y = 0.86, .ideal_z = -0.37 },
+        .{ .name = .{ 'H', '1', '3', ' ' }, .name_len = 3, .element_symbol = .{ 'H', ' ' }, .ideal_x = -1.38, .ideal_y = 0.37, .ideal_z = 1.33 },
+        .{ .name = .{ 'H', '2', '1', ' ' }, .name_len = 3, .element_symbol = .{ 'H', ' ' }, .ideal_x = 0.47, .ideal_y = -0.4, .ideal_z = -0.98 },
+        .{ .name = .{ 'H', '2', '2', ' ' }, .name_len = 3, .element_symbol = .{ 'H', ' ' }, .ideal_x = 0.68, .ideal_y = -0.87, .ideal_z = 0.71 },
+    };
+    var bonds = [_]ccd.CompBond{
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 1, .order = .single },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 2, .order = .single },
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 3, .order = .single },
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 4, .order = .single },
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 5, .order = .single },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 6, .order = .single },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 7, .order = .single },
+    };
+    const comp = ccd.Component{ .comp_id = "ETX", .comp_type = "non-polymer", .atoms = &atoms, .bonds = &bonds };
+    const existing = [_][4]u8{ atoms[0].name, atoms[1].name, atoms[2].name };
+    const plans = try derivePlans(testing.allocator, &comp, &existing, &.{});
+    defer testing.allocator.free(plans);
+    try testing.expectEqual(@as(usize, 5), plans.len);
+
+    for (plans) |plan| {
+        try testing.expectEqual(PlacementType.h3xr, plan.placement_type);
+        const pos = struct {
+            fn of(c: ccd.Component, name: [4]u8) Vec3(f64) {
+                const a = atomByName(&c, name).?;
+                return .{ .x = a.ideal_x, .y = a.ideal_y, .z = a.ideal_z };
+            }
+        };
+        const h_ideal = pos.of(comp, plan.h_name);
+        const x = pos.of(comp, plan.connected[0]);
+        const placed = geometry.placeH3XR(x, pos.of(comp, plan.connected[1]), pos.of(comp, plan.connected[2]), h_ideal.distance(x), plan.angle, plan.dihedral);
+        try testing.expect(placed.distance(h_ideal) < 1e-3);
+    }
 }
