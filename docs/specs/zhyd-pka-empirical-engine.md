@@ -4,8 +4,9 @@ Status: draft r6 (2026-11-07); parity mode implemented and accepted with
 documented deviations (see [Parity status](#parity-status-r2)); zhyd mode
 corrections Q1–Q8 implemented, measured and adopted (see
 [zhyd mode ablation](#zhyd-mode-ablation-r3)); recalibrated table
-`zhyd-empirical-v1.2` (see [Recalibration on merged data](#recalibration-on-merged-data-r6);
-v1.1 in [Recalibration](#recalibration-r4)). Target: an
+`zhyd-empirical-v1.3` (see [Recalibration from the parity table](#recalibration-from-the-parity-table-r7);
+v1.2 in [Recalibration on merged data](#recalibration-on-merged-data-r6), v1.1 in
+[Recalibration](#recalibration-r4)). Target: an
 MIT-licensed protein pKa engine in
 zhyd that first reproduces the PROPKA 3 empirical model ("parity mode") and
 then improves on it ("zhyd mode").
@@ -729,8 +730,8 @@ pair terms.
   correction is on, `zhyd-empirical-v1` for the adopted set (Q1–Q8),
   otherwise `zhyd-empirical-v1` followed by `+Qn` for every enabled
   correction (e.g. `zhyd-empirical-v1+Q2+Q7`). On the recalibrated table,
-  `zhyd-empirical-v1.2` (r6; v1.1 before) for the adopted set, otherwise
-  `zhyd-empirical-v1.2+Qn…` (`zhyd-empirical-v1.2+none` without
+  `zhyd-empirical-v1.3` (r7; v1.2 and v1.1 before) for the adopted set, otherwise
+  `zhyd-empirical-v1.3+Qn…` (`zhyd-empirical-v1.3+none` without
   corrections). A parameter override file reports its own version. Engine
   name `zhyd-empirical (parity)` with report status
   `experimental_parity_with_propka3_model` only for the unmodified parity
@@ -869,6 +870,83 @@ Every outer fold chose the same CYS point within one grid step. Notes:
 
 Fit record: `scripts/pka/params/zhyd-empirical-v1.2.json`.
 
+### Recalibration from the parity table (r7)
+
+**Problem with v1.2.** A check against new literature values (2026-11-09;
+see below) found buried histidines predicted far too high: HCA II His107
+(experiment < 3.5) at 10.64, His122 (< 3.5) at 7.48. Two causes:
+
+- **TYR desolvation 0.** With no desolvation, buried tyrosines drop from
+  pKa ≈ 13.6 to 6–7 (HCA II Tyr194 6.28, Tyr51 7.33). The acid–base pair
+  rule of the iterative scheme then treats each as a charged acid next to a
+  charged histidine and adds the pair's side-chain and Coulomb terms to the
+  histidine (His107 +2.8, His122 +2.9). The TYR fit saw only the all-rows
+  MAE; this knock-on effect on other kinds was not inspected.
+- **Fit baseline.** `calibrate_empirical.py` wrote only the fitted kind and
+  the fixed kinds into the override file, so every other kind took the value
+  built into the running binary. A refit run with a v1.2 binary therefore
+  started from the v1.2 HIS values, not from the parity table, and could not
+  reproduce v1.2's record (TYR default all-rows MAE 0.777 against 0.801).
+  The script now writes every kind's parity value first.
+
+**Procedure.** Same data (merged set, SHA-256 `b2bb08ce…`, 932 fitting rows,
+123 clusters), grids and selection rule as r6; kinds in order CYS, TYR, HIS,
+each from the parity table with the earlier kinds fixed, kept only if nested
+5-fold cluster CV beats the default. TYR was selected twice from one
+prediction cache: with the r6 grid (scale 0.0–1.5) and with the scale
+floored at 0.5, a floor chosen before looking at the result because a zero
+desolvation term is not physical.
+
+| Kind | Selected (model pKa, scale) | Nested CV MAE all rows (default) | Nested CV MAE kind (default) | Kept |
+|---|---|---|---|---|
+| CYS | 7.5, 0.45 | 0.8017 (0.9091) | 1.919 (3.533) | yes |
+| TYR, scale ≥ 0.0 | 10.5, 0.15 | 0.7934 (0.7938) | 1.490 (1.690) | no (gain 0.0004) |
+| TYR, scale ≥ 0.5 | 10.0, 0.5 | 0.7986 (0.7938) | 1.714 (1.690) | no |
+| HIS (on parity TYR) | 6.5, 0.6 | 0.7847 (0.7938) | 0.836 (0.892) | yes |
+
+`zhyd-empirical-v1.3` = CYS 7.5 / 0.45 and HIS desolvation 0.6; TYR and the
+HIS model pKa keep the parity values. MAE over the fitting rows (in-sample,
+899 rows predicted): v1.2 0.770, v1.3 0.776, CYS only 0.794. SNase (stress,
+not fitted): v1.2 1.019, v1.3 0.996, parity 0.924. TYR rows lose their
+in-sample gain (1.06 → 1.69), which nested CV says did not generalise.
+
+**New literature check.** 28 point values (10 ASP/GLU, 11 HIS, 7 LYS) and 10
+upper bounds from 2026 literature candidates outside PKAD-R and PKAD-3
+(MaSp1/2 NTD, BtFd, LCC-ICCG, caspase-9 CARD, GDPMH, RNase P protein; HCA II
+surface His and ubiquitin Lys as new sites in fitted proteins). It was
+looked at for v1.2 before this refit and for v1.3 after it, and was not used
+to select parameters. ASP, GLU and LYS do not change between versions. The
+set is `scripts/pka/eval/literature-2026-11.csv` and
+`scripts/pka/score_literature.py` scores reports against it.
+
+| Engine | HIS MAE (bias), n = 11 | All MAE, n = 28 | Upper bounds met (of 10) | pH 7 state agreement (of 38) |
+|---|---|---|---|---|
+| parity | 0.99 (+0.15) | 0.89 | 4 | 38 |
+| v1.2 | 1.21 (+0.64) | 0.98 | 2 | 33 |
+| v1.3 | 1.09 (+0.46) | 0.93 | 2 | 35 |
+
+The last column counts sites whose predicted protonation state at pH 7
+(pKa above or below 7) matches the experiment: every point value plus the
+upper bounds below 7. It is the number that matters for charge assignment.
+v1.3 misses LCC-ICCG His242 (4.8; 7.56 in both structures, 6.73 under
+parity) and HCA II His107. On the fitting rows the HIS desolvation change
+does not move it either way: 150 of 198 HIS sites agree at pH 7 with parity
+HIS values, 151 with v1.3.
+
+v1.3 is better than v1.2 on HIS here but still worse than parity: the fitted
+sets favour less histidine desolvation and these new values do not. Eleven
+sites cannot overrule 198 under nested CV; the disagreement is recorded for
+the next refit.
+
+**Known issue: acid–base pair threshold.** The pair rule switches on as soon
+as the histidine's pKa passes its partner's, so a small parameter change can
+move a buried histidine by several units. HCA II His107 under v1.3 (HIS
+desolvation 0.6, TYR at parity) is again 10.87 (scale 0.7: 7.68): now the
+histidine climbs past Tyr194 instead of Tyr194 dropping below it. This is the
+PROPKA 3 scheme itself and is not changed here.
+
+Fit record: `scripts/pka/params/zhyd-empirical-v1.3.json`.
+
 ## Revision log
 
 | Rev | Date | Change |
@@ -880,3 +958,4 @@ Fit record: `scripts/pka/params/zhyd-empirical-v1.2.json`.
 | r4 | 2026-11-07 | Protocol amendment (adopt physically motivated corrections with train-MAE effect within ±0.002); Q2 and Q4 adopted, zhyd v1 = Q1–Q8; per-kind model pKa and desolvation scale parameters with zhyd-mode override files; recalibrated table `zhyd-empirical-v1.1` (CYS and TYR, train split, leave-one-cluster-out CV); new version scheme |
 | r5 | 2026-11-07 | External test set disjoint from PKAD-R (30 % sequence clusters) and its results |
 | r6 | 2026-11-07 | Recalibration on PKAD-R merged with the external set (nested cluster CV): `zhyd-empirical-v1.2` with CYS, TYR and HIS parameters |
+| r7 | 2026-11-09 | Recalibration from the parity table (calibration script no longer inherits the binary's built-in table): `zhyd-empirical-v1.3` with CYS and HIS desolvation; TYR desolvation 0 dropped; new literature check; acid–base pair threshold recorded as a known issue |

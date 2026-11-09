@@ -57,9 +57,16 @@ def grid(lo: float, hi: float, step: float) -> list[float]:
 
 
 def overrides(version: str, kind: str, point: Point, fixed: dict) -> dict:
-    """Override file for `point`, on top of already fixed kinds."""
-    model = {**fixed.get("model_pka", {}), kind: point[0]}
-    scale = {**fixed.get("desolvation_scale", {}), kind: point[1]}
+    """Override file for `point`, on top of already fixed kinds.
+
+    Every kind starts from the parity table, so a fit does not depend on the
+    recalibrated table built into the zhyd binary that runs it."""
+    model = {**DEFAULT_MODEL_PKA, **fixed.get("model_pka", {}), kind: point[0]}
+    scale = {
+        **{k: 1.0 for k in DEFAULT_MODEL_PKA},
+        **fixed.get("desolvation_scale", {}),
+        kind: point[1],
+    }
     return {"version": version, "model_pka": model, "desolvation_scale": scale}
 
 
