@@ -1120,12 +1120,13 @@ test "tabulated brute force matches the rescoring reference" {
         var scratch = std.ArrayListUnmanaged(u32).empty;
         defer scratch.deinit(allocator);
 
+        // Build both contexts from the same starting coordinates: bonded
+        // exclusions are inferred from the positions at build time.
         var ctx_a = try buildScoreContext(allocator, &movers_a, model.atoms.items);
         defer ctx_a.deinit(allocator);
-        try optimizeBruteForceReference(allocator, &movers_a, &clq, &model, .{}, &ctx_a, &scratch);
-
         var ctx_b = try buildScoreContext(allocator, &movers_b, model.atoms.items);
         defer ctx_b.deinit(allocator);
+        try optimizeBruteForceReference(allocator, &movers_a, &clq, &model, .{}, &ctx_a, &scratch);
         try optimizeBruteForce(allocator, &movers_b, &clq, &model, .{}, &ctx_b, &scratch);
 
         for (0..n_movers) |i| {

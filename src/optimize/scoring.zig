@@ -14,6 +14,7 @@ const mover_mod = @import("mover.zig");
 const Mover = mover_mod.Mover;
 const scorer_mod = @import("scorer.zig");
 const element = @import("../element.zig");
+const exclusion_mod = @import("exclusion.zig");
 
 pub const ScoreContext = struct {
     cell_list: ?CellList,
@@ -37,6 +38,8 @@ pub const ScoreContext = struct {
     /// Precomputed so that scoring a mover does not scan every mover in the model.
     mover_neighbor_offsets: []u32,
     mover_neighbors: []u32,
+    /// Atoms within three bonds of each mover atom, left out of its score.
+    exclusions: exclusion_mod.Exclusions,
 
     pub fn neighborsOf(self: *const ScoreContext, mover_idx: u32) []const u32 {
         return self.mover_neighbors[self.mover_neighbor_offsets[mover_idx]..self.mover_neighbor_offsets[mover_idx + 1]];
@@ -53,6 +56,7 @@ pub const ScoreContext = struct {
         allocator.free(self.mover_atom_radii);
         allocator.free(self.mover_neighbor_offsets);
         allocator.free(self.mover_neighbors);
+        self.exclusions.deinit(allocator);
     }
 };
 
@@ -165,8 +169,12 @@ pub fn buildScoreContext(
     }
 
     const neighbors = try buildMoverNeighbors(allocator, mover_centroids, mover_radii);
+    errdefer allocator.free(neighbors.offsets);
+    errdefer allocator.free(neighbors.list);
+    const exclusions = try exclusion_mod.build(allocator, movers, atoms);
 
     return .{
+        .exclusions = exclusions,
         .mover_neighbor_offsets = neighbors.offsets,
         .mover_neighbors = neighbors.list,
         .cell_list = cell_list,
@@ -271,35 +279,16 @@ pub fn isMoverAtom(m: *const Mover, atom_idx: u32) bool {
     return false;
 }
 
-/// Atom pairs score zero once their gap exceeds this, in Angstrom. The
-/// interaction graph uses it to decide which movers can affect each other.
+/// Atom pairs score zero once their gap exceeds this, in Angstrom: twice the
+/// default probe radius, the farthest a dot's probe can reach. The interaction
+/// graph uses it to decide which movers can affect each other.
 pub const contact_margin: f32 = 0.5;
 
-/// Score an atom pair from two Atom structs.
-/// Returns a positive score for contacts/H-bonds and negative for bumps.
+/// Score atom `a` against atom `other`: the dot score of `a`'s surface against
+/// `other` (`scorer.pairDotScore`). Positive for contacts and H-bonds,
+/// negative for bumps. Not symmetric: the dots are on `a`.
 pub fn scorePair(a: Atom, other: Atom, scoring_params: scorer_mod.ScoringParams, gap_scale: f32) f32 {
-    const diff = a.pos.sub(other.pos);
-    const dist2 = diff.dot(diff);
-    const sum_r = a.vdw_radius + other.vdw_radius;
-    const sum_r2 = sum_r * sum_r;
-
-    if (dist2 < sum_r2) {
-        const dist = @sqrt(dist2);
-        const gap = dist - sum_r;
-        if (scorer_mod.isHBond(a.flags, other.flags, gap, scoring_params)) {
-            return scoring_params.hb_weight * (-0.5 * gap);
-        }
-        return -scoring_params.bump_weight * (-0.5 * gap);
-    }
-
-    const threshold = sum_r + contact_margin;
-    if (dist2 < threshold * threshold) {
-        const dist = @sqrt(dist2);
-        const gap = dist - sum_r;
-        const ratio = gap / gap_scale;
-        return math_mod.fastExp(-ratio * ratio);
-    }
-    return 0.0;
+    return scorePairSoA(a.pos, a.vdw_radius, a.flags, other.pos, other.vdw_radius, other.flags, scoring_params, gap_scale);
 }
 
 /// Like scorePair but takes individual fields instead of Atom structs.
@@ -317,26 +306,12 @@ pub fn scorePairSoA(
 ) f32 {
     const diff = pos_a.sub(pos_b);
     const dist2 = diff.dot(diff);
-    const sum_r = radius_a + radius_b;
-    const sum_r2 = sum_r * sum_r;
-
-    if (dist2 < sum_r2) {
-        const dist = @sqrt(dist2);
-        const gap = dist - sum_r;
-        if (scorer_mod.isHBond(flags_a, flags_b, gap, scoring_params)) {
-            return scoring_params.hb_weight * (-0.5 * gap);
-        }
-        return -scoring_params.bump_weight * (-0.5 * gap);
-    }
-
-    const threshold = sum_r + contact_margin;
-    if (dist2 < threshold * threshold) {
-        const dist = @sqrt(dist2);
-        const gap = dist - sum_r;
-        const ratio = gap / gap_scale;
-        return math_mod.fastExp(-ratio * ratio);
-    }
-    return 0.0;
+    const reach = radius_a + radius_b + contact_margin;
+    if (dist2 >= reach * reach) return 0.0;
+    var params = scoring_params;
+    params.gap_scale = gap_scale;
+    const hb_cut = scorer_mod.hbCutoff(flags_a, flags_b, params);
+    return scorer_mod.pairDotScore(@sqrt(dist2), radius_a, radius_b, hb_cut, flags_b.hb_only_dummy, params);
 }
 
 /// Score a mover against the model using explicit positions for its atoms.
@@ -405,6 +380,7 @@ pub fn scoreMoverExcluding(
                 return -std.math.inf(f32);
             };
             for (scratch.items) |static_idx| {
+                if (score_ctx.exclusions.excludes(ai, score_ctx.static_atom_indices[static_idx])) continue;
                 total += scorePairSoA(
                     a_pos, a_radius, a_flags,
                     score_ctx.static_positions[static_idx],
@@ -417,6 +393,7 @@ pub fn scoreMoverExcluding(
         } else {
             // Fallback: pairwise scan of all static atoms (no CellList available).
             for (0..score_ctx.static_atom_indices.len) |static_idx| {
+                if (score_ctx.exclusions.excludes(ai, score_ctx.static_atom_indices[static_idx])) continue;
                 total += scorePairSoA(
                     a_pos, a_radius, a_flags,
                     score_ctx.static_positions[static_idx],
@@ -439,6 +416,7 @@ pub fn scoreMoverExcluding(
                 if (oi == ai) continue;
                 if (mover_mod.isAbsentPos(atoms[oi].pos)) continue;
                 if (isMoverAtom(m, oi)) continue;
+                if (score_ctx.exclusions.excludes(ai, oi)) continue;
                 total += scorePairSoA(
                     a_pos, a_radius, a_flags,
                     atoms[oi].pos,
@@ -481,6 +459,7 @@ pub fn scoreMoverPair(
             if (oi == ai) continue;
             if (mover_mod.isAbsentPos(atoms[oi].pos)) continue;
             if (isMoverAtom(a, oi)) continue;
+            if (score_ctx.exclusions.excludes(ai, oi)) continue;
             total += scorePairSoA(
                 a_pos, a_radius, a_flags,
                 atoms[oi].pos,
@@ -545,54 +524,38 @@ const testing = std.testing;
 test "scorePair returns correct values for all branches" {
     const params = scorer_mod.ScoringParams{};
     const gap_scale = params.gap_scale;
+    const origin = math_mod.Vec3(f32){ .x = 0, .y = 0, .z = 0 };
 
-    // Branch 1: No interaction (atoms far apart) -- returns 0.0
+    // Out of reach (gap beyond the contact margin): zero.
     {
-        const a = Atom{ .pos = .{ .x = 0, .y = 0, .z = 0 }, .vdw_radius = 1.7 };
+        const a = Atom{ .pos = origin, .vdw_radius = 1.7 };
         const b = Atom{ .pos = .{ .x = 10, .y = 0, .z = 0 }, .vdw_radius = 1.7 };
         try testing.expectEqual(@as(f32, 0.0), scorePair(a, b, params, gap_scale));
     }
-
-    // Branch 2: Contact within threshold (dist between sum_r and sum_r + 0.5)
-    // sum_r = 1.7 + 1.7 = 3.4, threshold = 3.9
-    // place at distance 3.6: gap = 0.2
+    // Small gap: contact, positive.
     {
-        const a = Atom{ .pos = .{ .x = 0, .y = 0, .z = 0 }, .vdw_radius = 1.7 };
+        const a = Atom{ .pos = origin, .vdw_radius = 1.7 };
         const b = Atom{ .pos = .{ .x = 3.6, .y = 0, .z = 0 }, .vdw_radius = 1.7 };
-        const score = scorePair(a, b, params, gap_scale);
-        // gap = 0.2, ratio = 0.2 / 0.25 = 0.8, fastExp(-0.64) ≈ 0.527
-        try testing.expect(score > 0.0);
-        try testing.expect(@abs(score - math_mod.fastExp(@as(f32, -0.64))) < 0.001);
+        try testing.expect(scorePair(a, b, params, gap_scale) > 0.0);
     }
-
-    // Branch 3: Overlap without H-bond (bump) -- no donor/acceptor flags
-    // distance 3.0 < sum_r 3.4, gap = 3.0 - 3.4 = -0.4
+    // Overlap without H-bond flags: bump, negative.
     {
-        const a = Atom{ .pos = .{ .x = 0, .y = 0, .z = 0 }, .vdw_radius = 1.7 };
+        const a = Atom{ .pos = origin, .vdw_radius = 1.7 };
         const b = Atom{ .pos = .{ .x = 3.0, .y = 0, .z = 0 }, .vdw_radius = 1.7 };
-        const score = scorePair(a, b, params, gap_scale);
-        // bump: -bump_weight * (-0.5 * gap) = -10.0 * (-0.5 * -0.4) = -10.0 * 0.2 = -2.0
-        try testing.expect(score < 0.0);
-        try testing.expect(@abs(score - (-2.0)) < 0.001);
+        try testing.expect(scorePair(a, b, params, gap_scale) < 0.0);
     }
-
-    // Branch 4: Overlap with H-bond (donor + acceptor flags)
-    // distance 3.0 < sum_r 3.4, gap = -0.4 → -gap = 0.4 <= min_reg_hb_gap(0.6) → H-bond
+    // Same overlap between donor and acceptor: H-bond, positive.
     {
-        const a = Atom{
-            .pos = .{ .x = 0, .y = 0, .z = 0 },
-            .vdw_radius = 1.7,
-            .flags = .{ .donor = true },
-        };
-        const b = Atom{
-            .pos = .{ .x = 3.0, .y = 0, .z = 0 },
-            .vdw_radius = 1.7,
-            .flags = .{ .acceptor = true },
-        };
-        const score = scorePair(a, b, params, gap_scale);
-        // hb: hb_weight * (-0.5 * gap) = 4.0 * (-0.5 * -0.4) = 4.0 * 0.2 = 0.8
-        try testing.expect(score > 0.0);
-        try testing.expect(@abs(score - 0.8) < 0.001);
+        const a = Atom{ .pos = origin, .vdw_radius = 1.7, .flags = .{ .donor = true } };
+        const b = Atom{ .pos = .{ .x = 3.0, .y = 0, .z = 0 }, .vdw_radius = 1.7, .flags = .{ .acceptor = true } };
+        try testing.expect(scorePair(a, b, params, gap_scale) > 0.0);
+    }
+    // Values are the analytic dot score.
+    {
+        const a = Atom{ .pos = origin, .vdw_radius = 1.05, .flags = .{ .donor = true } };
+        const b = Atom{ .pos = .{ .x = 1.9, .y = 0, .z = 0 }, .vdw_radius = 1.4, .flags = .{ .acceptor = true } };
+        const expected = scorer_mod.pairDotScore(1.9, 1.05, 1.4, params.min_reg_hb_gap, false, params);
+        try testing.expectApproxEqAbs(expected, scorePair(a, b, params, gap_scale), 1e-5);
     }
 }
 

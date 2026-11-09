@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **Atom-pair scores are reduce's dot score, integrated in closed form**
+  (`scorer.pairDotScore`). The old pair score judged the whole pair by its
+  center distance: an H-bond whose center overlap passed the 0.6 A allowance
+  (H...O below about 1.85 A, the usual OH H-bond) became a full bump of -3.5.
+  reduce scores dots on the H surface and only penalizes the overlap beyond
+  the allowance. Scores are now in reduce's units (square Angstroms), which
+  the flip penalties already assumed. On the 100-structure set H-bonds go
+  from 143,750 to 152,174 (reduce -NUClear: 151,794); Ser OG H-bonds go from
+  2,203 to 4,783 (4,828) and Thr OG1 from 3,021 to 5,515 (5,034)
+- Atoms within three bonds of a mover atom are no longer scored against it,
+  as in reduce. Bonds are inferred from covalent radii. The 1-4 terms changed
+  with the torsion and pushed OH groups away from orientations eclipsing CA
+- Two charged atoms only H-bond when their charges are opposite, as in reduce
 - **Methyl groups are no longer optimized.** They stay staggered as placed.
   The score has no torsion term, so optimization turned 21 % of methyls
   eclipsed (24,425 of 116,224 on the 100-structure benchmark set), and their
