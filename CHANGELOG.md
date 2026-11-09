@@ -134,6 +134,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `NtermMode` enum re-exported from `zhyd.place` for library callers, with `treatsBreakAsNterm` and `placesPositiveCharge` predicate methods consolidating mode-dependent dispatch
 
 ### Fixed
+- Fix-file entries that match no mover (a typo, a methyl group, a residue
+  missing from the model) now log a warning instead of being ignored silently
+- The run summary no longer calls H skipped for a missing reference atom a
+  "potential plan bug"; truncated side chains are the usual cause, and reduce
+  skips the same H
 - Optimization was slow on structures with large cliques: brute force rescored
   every clique mover for every orientation combination, and every mover score
   scanned all movers in the model. Brute force now tabulates per-mover and
