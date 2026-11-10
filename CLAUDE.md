@@ -20,6 +20,7 @@ zig build test --summary all        # Run all tests (~490)
 ./zig-out/bin/zhyd run input.cif -d components.cif -o output.cif  # with CCD
 ./zig-out/bin/zhyd run input.cif -d components.cif --sdf ligand.sdf -o output.cif  # with SDF
 ./zig-out/bin/zhyd run input.cif -o output.cif --validate         # with diagnostics
+./zig-out/bin/zhyd run input.cif -o output.cif --ph 7.0           # pKa-driven protonation states
 
 # Batch processing (parallel)
 ./zig-out/bin/zhyd batch input_dir/ -o output_dir/
@@ -43,6 +44,7 @@ src/
   timing.zig            Per-stage timing for --timing
   pka_run.zig           Per-file pKa pipeline (shared by single-file and batch)
   pka_batch.zig         `pka <dir>` batch mode (parallel, JSONL log)
+  ph_states.zig         pKa prediction → protonation overrides (`run --ph`)
   root.zig              Library re-exports
   validate.zig          Post-placement model validation
   math.zig              Vec3, rotation, dihedral
@@ -101,7 +103,7 @@ src/
     exclusion.zig       Atoms within 3 bonds of a mover atom (distance-inferred), not scored
     mover.zig           Mover struct, Orientation, isAbsentH
     rotator.zig         OH/SH, NH3+, NH2 rotators + fine orientations (methyls stay staggered)
-    flipper.zig         Asn/Gln amide flip, His ring flip
+    flipper.zig         Asn/Gln amide flip, His ring flip (HID/HIE or HIP), carboxyl proton flip
     mover_gen.zig       Mover generation from placed atoms (standard + CCD)
     fix.zig             Mover state override from fix file
     clique.zig          Exact interaction graph (any orientation within scoring range) + components

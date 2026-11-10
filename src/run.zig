@@ -27,6 +27,9 @@ pub const ProcessConfig = struct {
     bond_policy: zhyd.place.BondPolicy = .{},
     nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
+    /// pH for pKa-driven protonation states (spec Phase 4); null keeps the
+    /// default states. User overrides still win.
+    ph: ?f32 = null,
     fix_path: ?[]const u8 = null,
     dump_movers_path: ?[]const u8 = null,
     strip_h: bool = false,
@@ -137,15 +140,30 @@ fn processModelShared(
     model_num: u32,
     n_models: usize,
     inline_dict: ?*const zhyd.ccd.ComponentDict,
-    protonation_overrides: ?*zhyd.place.ProtonationOverrides,
+    user_overrides: ?*zhyd.place.ProtonationOverrides,
     fix_overrides: ?*zhyd.optimize.fix.FixOverrides,
     mover_snapshots: *std.ArrayListUnmanaged(zhyd.writer.json_writer.MoverSnapshot),
     result: *ProcessResult,
     config: ProcessConfig,
     sw: *Stopwatch,
+    /// Receives this model's pKa-derived overrides under `config.ph`; the
+    /// caller owns them (they feed the state report).
+    ph_overrides: *?zhyd.place.ProtonationOverrides,
 ) !void {
     if (!config.quiet and n_models > 1) {
         std.debug.print("  Processing model {d} ({d} atoms)\n", .{ model_num, mdl.atoms.items.len });
+    }
+
+    var protonation_overrides: ?*const zhyd.place.ProtonationOverrides = user_overrides;
+    if (config.ph) |ph| {
+        // Same input as `zhyd pka`: default chemistry, then the empirical
+        // engine in zhyd mode.
+        zhyd.place.applyChemistryWithConfig(mdl, .{ .nterm_mode = config.nterm_mode });
+        var prediction = try zhyd.pka_empirical.predict(allocator, mdl, .{ .mode = .zhyd, .nterm_mode = config.nterm_mode });
+        defer prediction.deinit();
+        ph_overrides.* = try zhyd.ph_states.fromPrediction(allocator, mdl, &prediction, ph, user_overrides);
+        protonation_overrides = &ph_overrides.*.?;
+        sw.lapInto(&result.timing, .chemistry);
     }
 
     // Apply chemistry annotations
@@ -385,7 +403,14 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     var mover_snapshots = std.ArrayListUnmanaged(zhyd.writer.json_writer.MoverSnapshot).empty;
     defer mover_snapshots.deinit(allocator);
 
-    for (entries.items) |*entry| {
+    const ph_states = try allocator.alloc(?zhyd.place.ProtonationOverrides, entries.items.len);
+    @memset(ph_states, null);
+    defer {
+        for (ph_states) |*ov| if (ov.*) |*value| value.deinit();
+        allocator.free(ph_states);
+    }
+
+    for (entries.items, 0..) |*entry, model_i| {
         const mdl = &entry.model;
 
         // Build per-model atom lookup for bond parsing (mmCIF-specific)
@@ -411,6 +436,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
             &result,
             config,
             stopwatch,
+            &ph_states[model_i],
         );
     }
 
@@ -467,7 +493,11 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
     if (config.state_json_path) |state_path| {
         const reports = try allocator.alloc(zhyd.writer.protonation_json.StateReportModel, entries.items.len);
         defer allocator.free(reports);
-        for (entries.items, 0..) |*entry, i| reports[i] = .{ .model_num = entry.model_num, .model = &entry.model };
+        for (entries.items, 0..) |*entry, i| reports[i] = .{
+            .model_num = entry.model_num,
+            .model = &entry.model,
+            .overrides = if (ph_states[i]) |*ov| ov else null,
+        };
         try writeStateReportFile(
             state_path,
             config.input_path,
@@ -532,7 +562,14 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
     var mover_snapshots = std.ArrayListUnmanaged(zhyd.writer.json_writer.MoverSnapshot).empty;
     defer mover_snapshots.deinit(allocator);
 
-    for (pdb_result.entries.items) |*entry| {
+    const ph_states = try allocator.alloc(?zhyd.place.ProtonationOverrides, pdb_result.entries.items.len);
+    @memset(ph_states, null);
+    defer {
+        for (ph_states) |*ov| if (ov.*) |*value| value.deinit();
+        allocator.free(ph_states);
+    }
+
+    for (pdb_result.entries.items, 0..) |*entry, model_i| {
         const mdl = &entry.model;
 
         // PDB-specific: strip existing H per model (mmCIF strips at document level)
@@ -557,6 +594,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
             &result,
             config,
             stopwatch,
+            &ph_states[model_i],
         );
     }
 
@@ -608,7 +646,11 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
     if (config.state_json_path) |state_path| {
         const reports = try allocator.alloc(zhyd.writer.protonation_json.StateReportModel, pdb_result.entries.items.len);
         defer allocator.free(reports);
-        for (pdb_result.entries.items, 0..) |*entry, i| reports[i] = .{ .model_num = entry.model_num, .model = &entry.model };
+        for (pdb_result.entries.items, 0..) |*entry, i| reports[i] = .{
+            .model_num = entry.model_num,
+            .model = &entry.model,
+            .overrides = if (ph_states[i]) |*ov| ov else null,
+        };
         try writeStateReportFile(
             state_path,
             config.input_path,

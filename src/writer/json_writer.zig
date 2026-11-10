@@ -163,6 +163,7 @@ fn moverKindStr(kind: mover_mod.MoverKind) []const u8 {
         .nh2_rotator => "nh2_rotator",
         .amide_flip => "amide_flip",
         .his_flip => "his_flip",
+        .carboxyl_flip => "carboxyl_flip",
     };
 }
 

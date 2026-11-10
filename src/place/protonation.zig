@@ -11,7 +11,9 @@ const FixedString = fixed_string.FixedString;
 const Model = model_mod.Model;
 
 pub const HisState = enum { auto, hid, hie, hip };
-pub const AcidState = enum { deprotonated, atom1, atom2 };
+/// `protonated`: neutral acid with the proton's oxygen left to the
+/// optimizer (carboxyl flip mover); `atom1`/`atom2` pin it.
+pub const AcidState = enum { deprotonated, atom1, atom2, protonated };
 pub const LysState = enum { charged, neutral };
 pub const CysState = enum { thiol, thiolate };
 
@@ -38,10 +40,15 @@ pub const ResidueSelector = struct {
     }
 };
 
+/// Where an override came from: the user's file, or a pKa prediction at a
+/// requested pH (`run --ph`).
+pub const Source = enum { user, pka };
+
 pub const Entry = struct {
     selector: ResidueSelector,
     comp_id: FixedString(5) = .{},
     state: ResidueState,
+    source: Source = .user,
 
     pub fn compIdSlice(self: *const Entry) []const u8 {
         return self.comp_id.slice();
@@ -61,13 +68,19 @@ pub const ProtonationOverrides = struct {
     /// Find the protonation state override for a residue.
     /// When multiple entries match, the last entry in the file wins.
     pub fn find(self: *const ProtonationOverrides, mdl: *const Model, res_idx: usize) ?ResidueState {
+        const entry = self.findEntry(mdl, res_idx) orelse return null;
+        return entry.state;
+    }
+
+    /// The winning entry for a residue (state and source).
+    pub fn findEntry(self: *const ProtonationOverrides, mdl: *const Model, res_idx: usize) ?*const Entry {
         const res = mdl.residues.items[res_idx];
         var i = self.entries.len;
         while (i > 0) {
             i -= 1;
             const entry = &self.entries[i];
             if (!std.mem.eql(u8, entry.compIdSlice(), res.compIdSlice())) continue;
-            if (entry.selector.matches(mdl, res_idx)) return entry.state;
+            if (entry.selector.matches(mdl, res_idx)) return entry;
         }
         return null;
     }
@@ -223,12 +236,14 @@ fn parseState(comp_tok: []const u8, state_tok: []const u8) !ResidueState {
         if (std.ascii.eqlIgnoreCase(state_tok, "DEPROTONATED")) return .{ .asp = .deprotonated };
         if (std.ascii.eqlIgnoreCase(state_tok, "OD1")) return .{ .asp = .atom1 };
         if (std.ascii.eqlIgnoreCase(state_tok, "OD2")) return .{ .asp = .atom2 };
+        if (std.ascii.eqlIgnoreCase(state_tok, "PROTONATED")) return .{ .asp = .protonated };
         return error.InvalidProtonationOverride;
     }
     if (std.mem.eql(u8, comp_id, "GLU")) {
         if (std.ascii.eqlIgnoreCase(state_tok, "DEPROTONATED")) return .{ .glu = .deprotonated };
         if (std.ascii.eqlIgnoreCase(state_tok, "OE1")) return .{ .glu = .atom1 };
         if (std.ascii.eqlIgnoreCase(state_tok, "OE2")) return .{ .glu = .atom2 };
+        if (std.ascii.eqlIgnoreCase(state_tok, "PROTONATED")) return .{ .glu = .protonated };
         return error.InvalidProtonationOverride;
     }
     if (std.mem.eql(u8, comp_id, "LYS")) {

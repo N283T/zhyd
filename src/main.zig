@@ -22,6 +22,7 @@ const RunConfig = struct {
     bond_policy: zhyd.place.BondPolicy = .{},
     nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
+    ph: ?f32 = null,
     fix_path: ?[]const u8 = null,
     dump_movers_path: ?[]const u8 = null,
     strip_h: bool = false,
@@ -56,6 +57,7 @@ const CommonOptions = struct {
     bond_policy: zhyd.place.BondPolicy = .{},
     nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
+    ph: ?f32 = null,
     fix_path: ?[]const u8 = null,
     sdf_path: ?[]const u8 = null,
     strip_h: bool = false,
@@ -176,6 +178,22 @@ fn parseCommonOption(args: []const []const u8, i: *usize, common: *CommonOptions
         }
         common.protonation_path = args[i.*];
         return true;
+    } else if (std.mem.eql(u8, arg, "--ph")) {
+        i.* += 1;
+        if (i.* >= args.len) {
+            std.debug.print("Error: --ph requires a value\n", .{});
+            std.process.exit(1);
+        }
+        const value = std.fmt.parseFloat(f32, args[i.*]) catch {
+            std.debug.print("Error: invalid --ph '{s}'\n", .{args[i.*]});
+            std.process.exit(1);
+        };
+        if (!(value >= 0.0 and value <= 14.0)) {
+            std.debug.print("Error: --ph must be between 0 and 14\n", .{});
+            std.process.exit(1);
+        }
+        common.ph = value;
+        return true;
     } else if (std.mem.eql(u8, arg, "--fix")) {
         i.* += 1;
         if (i.* >= args.len) {
@@ -294,6 +312,7 @@ fn parseRunArgs(args: []const []const u8) ?RunConfig {
     config.bond_policy = common.bond_policy;
     config.nterm_mode = common.nterm_mode;
     config.protonation_path = common.protonation_path;
+    config.ph = common.ph;
     config.fix_path = common.fix_path;
     config.sdf_path = common.sdf_path;
     config.strip_h = common.strip_h;
@@ -498,6 +517,8 @@ fn printRunUsage() void {
         \\    --json PATH        Write JSON log to file
         \\    --state-json PATH  Write versioned applied protonation/formal-charge report
         \\    --protonation PATH  Residue protonation override file
+        \\    --ph VALUE         Protonation states from predicted pKa at this pH
+        \\                       (HIS/ASP/GLU/LYS/CYS; experimental; overrides win)
         \\    --fix PATH         Force mover states from control file
         \\    --dump-movers PATH  Write available mover IDs/states to file
         \\    --no-opt           Skip optimization
@@ -636,6 +657,7 @@ fn parseBatchArgs(args: []const []const u8) ?zhyd.batch.BatchConfig {
     config.bond_policy = common.bond_policy;
     config.nterm_mode = common.nterm_mode;
     config.protonation_path = common.protonation_path;
+    config.ph = common.ph;
     config.fix_path = common.fix_path;
     config.sdf_path = common.sdf_path;
     config.strip_h = common.strip_h;
@@ -657,6 +679,8 @@ fn printBatchUsage() void {
         \\    -j, --threads N    Thread count (default: auto-detect)
         \\    --jsonl PATH       Aggregated JSONL log file
         \\    --protonation PATH  Residue protonation override file
+        \\    --ph VALUE         Protonation states from predicted pKa at this pH
+        \\                       (HIS/ASP/GLU/LYS/CYS; experimental; overrides win)
         \\    --fix PATH         Force mover states from control file
         \\    --no-opt           Skip optimization
         \\    --no-flip          Disable flips
@@ -848,6 +872,7 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
         .bond_policy = config.bond_policy,
         .nterm_mode = config.nterm_mode,
         .protonation_path = config.protonation_path,
+        .ph = config.ph,
         .fix_path = config.fix_path,
         .dump_movers_path = config.dump_movers_path,
         .strip_h = config.strip_h,

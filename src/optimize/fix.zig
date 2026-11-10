@@ -229,7 +229,8 @@ pub fn dumpMovers(writer: anytype, mdl: *const Model, movers: []const Mover) !vo
 fn dumpStates(writer: anytype, m: *const Mover) !void {
     switch (m.kind) {
         .amide_flip => try writer.writeAll("ORIGINAL|FLIP"),
-        .his_flip => try writer.writeAll("HIE|HID|HIE_FLIP|HID_FLIP"),
+        // HIP (2 orientations) falls through to indices: 0 original, 1 flipped.
+        .his_flip => if (m.nOrientations() == 4) try writer.writeAll("HIE|HID|HIE_FLIP|HID_FLIP") else try writer.writeAll("0|1"),
         else => try writer.print("0..{d}", .{m.nOrientations() - 1}),
     }
 }
@@ -238,6 +239,7 @@ pub fn moverTargetName(mdl: *const Model, m: *const Mover) []const u8 {
     return switch (m.kind) {
         .amide_flip => "amide",
         .his_flip => "his",
+        .carboxyl_flip => "carboxyl",
         .single_h_rotator, .nh3_rotator, .nh2_rotator => blk: {
             const center_idx = m.center_idx orelse break :blk "unknown";
             break :blk mdl.atoms.items[center_idx].nameSlice();
@@ -256,7 +258,8 @@ fn entryOrientation(m: *const Mover, value: Value) ?u16 {
             else => null,
         },
         .his => |his| switch (m.kind) {
-            .his_flip => switch (his) {
+            // Tautomer names apply to the neutral 4-orientation mover only.
+            .his_flip => if (m.nOrientations() != 4) null else switch (his) {
                 .hie => 0,
                 .hid => 1,
                 .hie_flip => 2,

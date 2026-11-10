@@ -267,14 +267,14 @@ fn getOverrideAnnotation(comp_id: []const u8, atom_name: [4]u8, state: protonati
         if (nameEql(&atom_name, &n("OD1 "))) {
             return switch (state.asp) {
                 .deprotonated => .{ .atom_type = .O, .flags = NEG_A },
-                .atom1 => .{ .atom_type = .O, .flags = D },
+                .atom1, .protonated => .{ .atom_type = .O, .flags = D },
                 .atom2 => .{ .atom_type = .O, .flags = A },
             };
         }
         if (nameEql(&atom_name, &n("OD2 "))) {
             return switch (state.asp) {
                 .deprotonated => .{ .atom_type = .O, .flags = NEG_A },
-                .atom1 => .{ .atom_type = .O, .flags = A },
+                .atom1, .protonated => .{ .atom_type = .O, .flags = A },
                 .atom2 => .{ .atom_type = .O, .flags = D },
             };
         }
@@ -284,14 +284,14 @@ fn getOverrideAnnotation(comp_id: []const u8, atom_name: [4]u8, state: protonati
         if (nameEql(&atom_name, &n("OE1 "))) {
             return switch (state.glu) {
                 .deprotonated => .{ .atom_type = .O, .flags = NEG_A },
-                .atom1 => .{ .atom_type = .O, .flags = D },
+                .atom1, .protonated => .{ .atom_type = .O, .flags = D },
                 .atom2 => .{ .atom_type = .O, .flags = A },
             };
         }
         if (nameEql(&atom_name, &n("OE2 "))) {
             return switch (state.glu) {
                 .deprotonated => .{ .atom_type = .O, .flags = NEG_A },
-                .atom1 => .{ .atom_type = .O, .flags = A },
+                .atom1, .protonated => .{ .atom_type = .O, .flags = A },
                 .atom2 => .{ .atom_type = .O, .flags = D },
             };
         }

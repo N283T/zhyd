@@ -243,7 +243,8 @@ pub fn generateMovers(
         const comp_id = res.compIdSlice();
         const h_name = atom.nameSlice();
         const target_altloc = atom.altloc;
-        const residue_state = if (overrides) |ov| ov.find(mdl, residue_idx) else null;
+        const residue_entry = if (overrides) |ov| ov.findEntry(mdl, residue_idx) else null;
+        const residue_state: ?protonation.ResidueState = if (residue_entry) |e| e.state else null;
 
         // Per-component dict fallback: inline_dict first, then ccd_dict.
         const effective_dict: ?*const ComponentDict = blk: {
@@ -525,8 +526,14 @@ pub fn generateMovers(
                 try movers.append(allocator, m);
             },
             .flip_his => {
-                if (residue_state) |state| {
-                    if (state == .his and state.his != .auto) continue;
+                // A user's explicit tautomer pins the ring. A pKa-derived HIP
+                // fixes only the charge: the ring may still flip.
+                var charged = false;
+                if (residue_entry) |entry| {
+                    if (entry.state == .his and entry.state.his != .auto) {
+                        if (entry.source != .pka or entry.state.his != .hip) continue;
+                        charged = true;
+                    }
                 }
                 if (no_flip) continue;
 
@@ -560,6 +567,11 @@ pub fn generateMovers(
                 // H atoms are optional
                 const hd1_idx = findAtomIdx(atoms, res, residue_idx, "HD1", target_altloc, mdl.original_atom_count);
                 const he2_idx = findAtomIdx(atoms, res, residue_idx, "HE2", target_altloc, mdl.original_atom_count);
+                if (charged and (hd1_idx == null or he2_idx == null)) {
+                    log.warn("HIP flip needs both HD1 and HE2 (res {d}), skipping", .{residue_idx});
+                    n_skipped += 1;
+                    continue;
+                }
 
                 const m = try flipper.createHisFlipper(
                     allocator,
@@ -572,7 +584,35 @@ pub fn generateMovers(
                     he2_idx,
                     residue_idx,
                     mode,
+                    charged,
                 );
+                try movers.append(allocator, m);
+            },
+            .flip_carboxyl => {
+                // One mover per residue and altloc, built from either H.
+                const group_key = GroupKey{ .residue_idx = residue_idx, .center_name = .{ 'C', 'O', 'O', 'H' }, .altloc = target_altloc };
+                const gop = try seen_groups.getOrPut(allocator, group_key);
+                if (gop.found_existing) continue;
+                const names: [5][]const u8 = if (std.mem.eql(u8, comp_id, "ASP"))
+                    .{ "OD1", "OD2", "CG", "HD1", "HD2" }
+                else if (std.mem.eql(u8, comp_id, "GLU"))
+                    .{ "OE1", "OE2", "CD", "HE1", "HE2" }
+                else
+                    continue;
+                var carboxyl_idx: [5]u32 = undefined;
+                var found = true;
+                for (names, 0..) |name, k| {
+                    carboxyl_idx[k] = findAtomIdx(atoms, res, residue_idx, name, target_altloc, mdl.original_atom_count) orelse {
+                        found = false;
+                        break;
+                    };
+                }
+                if (!found) {
+                    log.warn("carboxyl flip atoms missing in {s} (res {d}), skipping", .{ comp_id, residue_idx });
+                    n_skipped += 1;
+                    continue;
+                }
+                const m = try flipper.createCarboxylFlipper(allocator, atoms, carboxyl_idx[0], carboxyl_idx[1], carboxyl_idx[2], carboxyl_idx[3], carboxyl_idx[4], residue_idx, mode);
                 try movers.append(allocator, m);
             },
             .none => continue,
@@ -897,6 +937,108 @@ test "generateMovers skips fixed His override" {
     for (movers) |m| {
         try testing.expect(m.kind != .his_flip);
     }
+}
+
+test "generateMovers keeps the ring flip for a pKa-derived HIP" {
+    const source = @embedFile("../test_data/his.cif");
+    var overrides = try protonation.parseString(testing.allocator,
+        \\A:1 HIS HIP
+    );
+    defer overrides.deinit();
+
+    // A user's HIP pins the ring; the same state from a pKa prediction
+    // fixes only the charge.
+    for ([_]protonation.Source{ .user, .pka }) |src| {
+        overrides.entries[0].source = src;
+        var m = try mmcif.parseModel(testing.allocator, source);
+        defer m.deinit();
+        m.residues.items[0].auth_seq_id = 1;
+        placer.applyChemistryWithConfig(&m, .{ .protonation = &overrides });
+        _ = try placer.addHydrogensWithConfig(&m, null, null, .{ .protonation = &overrides });
+        const gen_result = try generateMovers(testing.allocator, &m, false, null, null, &overrides, .neutron);
+        const movers = gen_result.movers;
+        defer {
+            for (0..movers.len) |i| @constCast(&movers[i]).deinit();
+            testing.allocator.free(movers);
+        }
+        var his: ?*const Mover = null;
+        for (movers) |*mv| {
+            if (mv.kind == .his_flip) his = mv;
+        }
+        if (src == .user) {
+            try testing.expect(his == null);
+        } else {
+            try testing.expectEqual(@as(usize, 2), his.?.orientations.len);
+        }
+    }
+}
+
+test "protonated ASP leaves the proton's oxygen to a carboxyl flip mover" {
+    const source =
+        \\data_ASP
+        \\#
+        \\loop_
+        \\_atom_site.group_PDB
+        \\_atom_site.id
+        \\_atom_site.type_symbol
+        \\_atom_site.label_atom_id
+        \\_atom_site.label_comp_id
+        \\_atom_site.label_asym_id
+        \\_atom_site.label_seq_id
+        \\_atom_site.Cartn_x
+        \\_atom_site.Cartn_y
+        \\_atom_site.Cartn_z
+        \\_atom_site.occupancy
+        \\_atom_site.B_iso_or_equiv
+        \\_atom_site.label_alt_id
+        \\_atom_site.auth_asym_id
+        \\_atom_site.auth_seq_id
+        \\ATOM 1 N N ASP A 1 0.0 0.0 0.0 1.00 10.0 . A 1
+        \\ATOM 2 C CA ASP A 1 1.5 0.0 0.0 1.00 10.0 . A 1
+        \\ATOM 3 C C ASP A 1 2.1 1.4 0.0 1.00 10.0 . A 1
+        \\ATOM 4 O O ASP A 1 3.3 1.6 0.0 1.00 10.0 . A 1
+        \\ATOM 5 C CB ASP A 1 2.0 -0.8 1.2 1.00 10.0 . A 1
+        \\ATOM 6 C CG ASP A 1 3.4 -0.4 1.4 1.00 10.0 . A 1
+        \\ATOM 7 O OD1 ASP A 1 4.2 0.3 0.7 1.00 10.0 . A 1
+        \\ATOM 8 O OD2 ASP A 1 3.8 -0.8 2.6 1.00 10.0 . A 1
+        \\#
+    ;
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    var overrides = try protonation.parseString(testing.allocator,
+        \\A:1 ASP PROTONATED
+    );
+    defer overrides.deinit();
+    placer.applyChemistryWithConfig(&mdl, .{ .protonation = &overrides });
+    _ = try placer.addHydrogensWithConfig(&mdl, null, null, .{ .protonation = &overrides });
+
+    // Placement: HD1 on OD1, HD2 parked at the absent sentinel, so the
+    // result is a single proton even without optimization.
+    var hd1: ?u32 = null;
+    var hd2: ?u32 = null;
+    for (mdl.atoms.items, 0..) |atom, i| {
+        if (!atom.is_added) continue;
+        if (std.mem.eql(u8, atom.nameSlice(), "HD1")) hd1 = @intCast(i);
+        if (std.mem.eql(u8, atom.nameSlice(), "HD2")) hd2 = @intCast(i);
+    }
+    try testing.expect(!mover_mod.isAbsentH(mdl.atoms.items[hd1.?]));
+    try testing.expect(mover_mod.isAbsentH(mdl.atoms.items[hd2.?]));
+
+    const gen_result = try generateMovers(testing.allocator, &mdl, false, null, null, &overrides, .neutron);
+    const movers = gen_result.movers;
+    defer {
+        for (0..movers.len) |i| @constCast(&movers[i]).deinit();
+        testing.allocator.free(movers);
+    }
+    var n_carboxyl: usize = 0;
+    for (movers) |m| {
+        if (m.kind != .carboxyl_flip) continue;
+        n_carboxyl += 1;
+        try testing.expectEqual(@as(usize, 2), m.orientations.len);
+        try testing.expectEqual(hd1.?, m.atom_indices[2]);
+        try testing.expectEqual(hd2.?, m.atom_indices[3]);
+    }
+    try testing.expectEqual(@as(usize, 1), n_carboxyl);
 }
 
 // ── NH2 group rotator (issue #253) ───────────────────────────────────────────
