@@ -386,7 +386,7 @@ test "prediction report distinguishes empirical parity and zhyd modes" {
     const Case = struct { mode: pka_empirical.Mode, status: []const u8, version: []const u8 };
     for ([_]Case{
         .{ .mode = .parity, .status = "experimental_parity_with_propka3_model", .version = "\"zhyd-empirical-v1-parity\"" },
-        .{ .mode = .zhyd, .status = "experimental_unvalidated", .version = "\"zhyd-empirical-v1.3\"" },
+        .{ .mode = .zhyd, .status = "experimental_unvalidated", .version = "\"zhyd-empirical-v1.4\"" },
     }) |c| {
         var prediction = try pka_empirical.predict(testing.allocator, &mdl, .{ .mode = c.mode });
         defer prediction.deinit();

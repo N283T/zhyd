@@ -70,21 +70,41 @@ pub fn step(pair: *Pair, q1: f64, q2: f64, p1: f64, p2: f64, params: Parameters)
         pair.a1 = 0;
         pair.a2 = 0;
         const apply = (q1 == -1 and k1 < k2) or (q1 == 1 and k1 > k2);
-        if (apply) {
+        // Q9: an acid–base pair gets the interaction in proportion to the
+        // ion-pair population instead of all-or-nothing at k₁ = k₂.
+        const w: f64 = if (params.fixes.q9 and q1 * q2 < 0)
+            ionPairWeight(q1, k1, k2, c + h)
+        else if (apply) 1.0 else 0.0;
+        if (w > 0) {
             if (c > params.min_contribution) {
-                pair.coulomb1 = q1 * c;
-                pair.coulomb2 = q2 * c;
-                pair.a1 -= q1 * c;
-                pair.a2 -= q2 * c;
+                pair.coulomb1 = w * q1 * c;
+                pair.coulomb2 = w * q2 * c;
+                pair.a1 -= w * q1 * c;
+                pair.a2 -= w * q2 * c;
             }
             if (h > params.min_contribution) {
-                pair.side_chain1 = q1 * h;
-                pair.side_chain2 = q2 * h;
-                pair.a1 -= q1 * h;
-                pair.a2 -= q2 * h;
+                pair.side_chain1 = w * q1 * h;
+                pair.side_chain2 = w * q2 * h;
+                pair.a1 -= w * q1 * h;
+                pair.a2 -= w * q2 * h;
             }
         }
     }
+}
+
+/// Q9 weight of an acid–base pair with interaction W = c + h (pKa units):
+/// the population of the ion pair (A⁻·BH⁺) against the neutral pair
+/// (AH·B), whose proton-transfer equilibrium gives
+///   w = 1 / (1 + 10^(pA − pB − W)),
+/// with pA, pB the values without this pair's interaction. Since
+/// kᵢ = pᵢ + qᵢW, pA − pB − W = (k_acid − k_base) + W. The weight is 0.5
+/// where the ion pair and the neutral pair are equally stable, W below the
+/// parity switch point k_acid = k_base, and it changes over about two pKa
+/// units instead of in one step.
+pub fn ionPairWeight(q1: f64, k1: f64, k2: f64, interaction: f64) f64 {
+    const k_acid_minus_base = if (q1 < 0) k1 - k2 else k2 - k1;
+    const x = std.math.clamp(k_acid_minus_base + interaction, -30.0, 30.0);
+    return 1.0 / (1.0 + std.math.pow(f64, 10.0, x));
 }
 
 /// Run the scheme and add the final contributions above the threshold to the
@@ -185,4 +205,41 @@ test "three-group iterative case" {
     try testing.expectApproxEqAbs(@as(f64, -0.4), groups[1].coulomb, 1e-12);
     try testing.expectApproxEqAbs(@as(f64, 0.6), groups[2].side_chain, 1e-12);
     try testing.expectApproxEqAbs(@as(f64, 0.7), groups[2].coulomb, 1e-12);
+}
+
+test "Q9 weight is the ion-pair population" {
+    // Acid pA = 4, base pB = 6, W = 1: k_acid = 3, k_base = 7;
+    // pA − pB − W = −3 → w = 1 / (1 + 10⁻³).
+    try testing.expectApproxEqAbs(1.0 / (1.0 + 1e-3), ionPairWeight(-1, 3.0, 7.0, 1.0), 1e-12);
+    // Equal stability (pA − pB = W, i.e. k_acid − k_base = −W) gives one half.
+    try testing.expectApproxEqAbs(@as(f64, 0.5), ionPairWeight(-1, 4.0, 5.0, 1.0), 1e-12);
+    // Acid far above base: no ion pair.
+    try testing.expect(ionPairWeight(-1, 12.0, 5.0, 1.0) < 1e-5);
+    // Group 1 the base: same weight with the roles swapped.
+    try testing.expectApproxEqAbs(ionPairWeight(-1, 3.0, 7.0, 1.0), ionPairWeight(1, 7.0, 3.0, 1.0), 1e-12);
+}
+
+test "Q9 removes the acid-base threshold jump" {
+    // A buried HIS (base, later) next to a TYR (acid, 13.0); h = 1.6,
+    // c = 1.2. Sweep the HIS start value across the parity threshold
+    // k_his = k_tyr, i.e. p_his = 13.0 − 2(c + h) = 7.4.
+    const h = 1.6;
+    const c = 1.2;
+    var largest_step = [2]f64{ 0, 0 };
+    for ([_]bool{ false, true }, 0..) |q9, mode| {
+        var previous: ?f64 = null;
+        var p: f64 = 6.0;
+        while (p <= 11.5 + 1e-9) : (p += 0.05) {
+            var groups = [_]Group{ testGroup(.tyr, 13.0), testGroup(.his, p) };
+            var pairs = [_]Pair{.{ .g1 = 1, .g2 = 0, .h = h, .c = c }};
+            try solve(testing.allocator, &groups, &pairs, .{ .fixes = .{ .q9 = q9 } });
+            const his = groups[1].total();
+            if (previous) |prev| largest_step[mode] = @max(largest_step[mode], his - prev);
+            previous = his;
+        }
+    }
+    // Parity: the full 2.8 lands in one 0.05 step. Q9: the step plus at most
+    // the logistic's steepest slope (ln 10 / 4 per unit × 2.8) times the step.
+    try testing.expect(largest_step[0] > 2.7);
+    try testing.expect(largest_step[1] < 0.15);
 }

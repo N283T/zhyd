@@ -4,7 +4,7 @@
 //! in docs/specs/zhyd-pka-empirical-engine.md. It was implemented from that
 //! specification, the published papers and black-box oracle reports only; it
 //! contains no code from PROPKA or zpropka. zhyd mode applies the corrections
-//! Q1–Q8 of the specification's "Known parity quirks", each behind its own
+//! Q1–Q9 of the specification's "Known parity quirks", each behind its own
 //! switch (`params.Fixes`).
 //!
 //! Disulfide, metal-coordinated and covalently bonded cysteines are listed in
@@ -29,8 +29,8 @@ pub const Fixes = params.Fixes;
 
 /// Corrections enabled by zhyd mode: Q1–Q8, adopted on the PKAD-R train
 /// split under the r4 protocol (see the specification's "zhyd mode
-/// evaluation protocol" and "zhyd mode ablation").
-pub const zhyd_fixes: Fixes = .{ .q1 = true, .q2 = true, .q3 = true, .q4 = true, .q5 = true, .q6 = true, .q7 = true, .q8 = true };
+/// evaluation protocol" and "zhyd mode ablation"), and Q9 (r8).
+pub const zhyd_fixes: Fixes = .{ .q1 = true, .q2 = true, .q3 = true, .q4 = true, .q5 = true, .q6 = true, .q7 = true, .q8 = true, .q9 = true };
 
 pub const Mode = enum {
     /// Reproduce the PROPKA 3 model, quirks included.
@@ -188,8 +188,9 @@ test "zhyd mode names its engine and correction set" {
     const cases = [_]Case{
         .{ .options = .{}, .engine = parity_engine_name, .version = params.parity_version },
         .{ .options = .{ .mode = .zhyd }, .engine = zhyd_engine_name, .version = params.zhyd_version },
-        .{ .options = .{ .mode = .zhyd, .fixes = .none }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1.3+none" },
-        .{ .options = .{ .fixes = zhyd_fixes }, .engine = zhyd_engine_name, .version = params.zhyd_v1_version },
+        .{ .options = .{ .mode = .zhyd, .fixes = .none }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1.4+none" },
+        .{ .options = .{ .fixes = params.v1_fixes }, .engine = zhyd_engine_name, .version = params.zhyd_v1_version },
+        .{ .options = .{ .fixes = zhyd_fixes }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1+Q1+Q2+Q3+Q4+Q5+Q6+Q7+Q8+Q9" },
         .{ .options = .{ .fixes = .{ .q2 = true, .q7 = true } }, .engine = zhyd_engine_name, .version = "zhyd-empirical-v1+Q2+Q7" },
         .{ .options = .{ .mode = .zhyd, .overrides = .{ .version = "my-fit" } }, .engine = zhyd_engine_name, .version = "my-fit" },
     };
