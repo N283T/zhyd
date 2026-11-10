@@ -10,6 +10,7 @@ import evaluate
 import external_set
 import merge_sets
 import pkadr
+import score_literature
 
 
 def record(index, pdb, res="ASP", pka="4.0", name="P", similar="", warning=""):
@@ -381,8 +382,62 @@ class PkadrTests(unittest.TestCase):
         overrides = calibrate_empirical.overrides(
             "v", "CYS", (8.0, 0.5), {"model_pka": {"TYR": 9.5}}
         )
-        self.assertEqual(overrides["model_pka"], {"TYR": 9.5, "CYS": 8.0})
-        self.assertEqual(overrides["desolvation_scale"], {"CYS": 0.5})
+        # Every kind starts from the parity table, whatever the binary's
+        # built-in recalibrated table is; fixed kinds and the point win.
+        self.assertEqual(overrides["model_pka"]["CYS"], 8.0)
+        self.assertEqual(overrides["model_pka"]["TYR"], 9.5)
+        self.assertEqual(overrides["model_pka"]["HIS"], 6.5)
+        self.assertEqual(overrides["desolvation_scale"]["CYS"], 0.5)
+        self.assertEqual(overrides["desolvation_scale"]["HIS"], 1.0)
+        self.assertEqual(
+            set(overrides["model_pka"]), set(calibrate_empirical.DEFAULT_MODEL_PKA)
+        )
+
+    def test_literature_scoring_handles_upper_bounds(self):
+        def row(pdb, seq, value, qualifier="point"):
+            return {
+                "entry_id": f"{pdb}-{seq}",
+                "pdb_id": pdb,
+                "chain": "A",
+                "auth_seq_id": str(seq),
+                "site": "HIS",
+                "experimental_pka": value,
+                "value_qualifier": qualifier,
+            }
+
+        self.assertIs(
+            score_literature.experimental_state(row("X", 1, "6.5"), 7.0), False
+        )
+        self.assertIs(
+            score_literature.experimental_state(row("X", 1, "3.5", "upper_bound"), 7.0),
+            False,
+        )
+        self.assertIsNone(
+            score_literature.experimental_state(row("X", 1, "8.0", "upper_bound"), 7.0)
+        )
+
+        def site(seq, pka, confidence="high"):
+            return {
+                "id": {"chain_auth": "A", "auth_seq_id": seq, "site": "HIS"},
+                "pka": {"predicted": pka},
+                "confidence": confidence,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = {"models": [{"sites": [site(1, 6.0), site(2, 7.5, "low")]}]}
+            (Path(tmp) / "X.json").write_text(json.dumps(report))
+            rows = [
+                row("X", 1, "6.5"),
+                row("X", 2, "3.5", "upper_bound"),
+                row("X", 3, "6.0"),
+            ]
+            result = score_literature.score(rows, Path(tmp), 7.0)
+        self.assertEqual(result["points"], 1)
+        self.assertAlmostEqual(result["mae"], 0.5)
+        self.assertEqual((result["bounds_met"], result["bounds"]), (0, 1))
+        self.assertEqual((result["state_agree"], result["states"]), (1, 2))
+        self.assertEqual(result["low_confidence"], ["X-2"])
+        self.assertEqual(result["missing"], ["X-3"])
 
 
 if __name__ == "__main__":

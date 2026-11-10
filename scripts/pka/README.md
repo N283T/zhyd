@@ -32,6 +32,14 @@ It prints the share of sites within `--tolerance` (default 0.02), the largest
 difference in the predicted value and in each term, and sites present in only
 one report; the exit status is 1 when the parity gate fails.
 
+## Literature evaluation set
+
+`eval/literature-2026-11.csv` holds experimental values from recent papers
+outside PKAD-R and the external set, including upper bounds ("pKa < 3.5").
+`score_literature.py` reports point MAE, upper bounds met and pH 7
+protonation-state agreement per report directory; see
+[eval/README.md](eval/README.md).
+
 ## Experimental evaluation (PKAD-R)
 
 Do not commit redistributed PKAD-R data. Download the standalone JSON file
@@ -61,7 +69,8 @@ fitted. The record of the v1.1 fit is `params/zhyd-empirical-v1.1.json`.
 `--rows all` fits on every non-holdout row of a merged set built by
 `merge_sets.py` (clusters joined through RCSB 30 % sequence clusters), and
 `--nested-folds K` estimates the whole procedure by nested cluster CV. The
-v1.2 fit (PKAD-R + external set) is `params/zhyd-empirical-v1.2.json`:
+v1.3 fit (PKAD-R + external set, every kind from the parity table) is
+`params/zhyd-empirical-v1.3.json`:
 
 ```sh
 python3 scripts/pka/merge_sets.py pkadr=canonical.csv external=external.csv \

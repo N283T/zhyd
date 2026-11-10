@@ -1,0 +1,509 @@
+{
+  "parameters": {
+    "version": "zhyd-empirical-v1.3",
+    "model_pka": {
+      "CYS": 7.5
+    },
+    "desolvation_scale": {
+      "CYS": 0.45,
+      "HIS": 0.6
+    }
+  },
+  "note": "Fit record only (not a --parameters input). Values are built into src/pka_empirical/params.zig (calibrated). Kinds were fitted in order CYS, TYR, HIS from the parity table (calibrate_empirical.py writes every kind's parity value into the override file, so the built-in table of the running binary does not leak in), each with the earlier kinds fixed. A kind is kept only if its nested 5-fold cluster CV MAE beats the default. TYR was refitted twice from the same prediction cache: unconstrained (scale grid 0.0-1.5) and with the scale floored at 0.5; neither beat the default under nested CV, so TYR keeps the parity values and HIS was fitted on top of the parity TYR.",
+  "fits": {
+    "CYS": {
+      "kind": "CYS",
+      "selected": "both",
+      "model_pka": 7.5,
+      "desolvation_scale": 0.45,
+      "variants": {
+        "default": {
+          "model_pka": 9.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.9091,
+          "train_mae_kind": 3.5328,
+          "cv_mae": 0.9091,
+          "cv_mae_kind": 3.5328
+        },
+        "model_pka": {
+          "model_pka": 7.5,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.8313,
+          "train_mae_kind": 2.3882,
+          "cv_mae": 0.8313,
+          "cv_mae_kind": 2.3882
+        },
+        "desolvation_scale": {
+          "model_pka": 9.0,
+          "desolvation_scale": 0.0,
+          "train_mae": 0.8187,
+          "train_mae_kind": 2.1816,
+          "cv_mae": 0.8231,
+          "cv_mae_kind": 2.2485
+        },
+        "both": {
+          "model_pka": 7.5,
+          "desolvation_scale": 0.45,
+          "train_mae": 0.7938,
+          "train_mae_kind": 1.798,
+          "cv_mae": 0.8042,
+          "cv_mae_kind": 1.9569
+        }
+      },
+      "nested_cv": {
+        "folds": 5,
+        "nested_cv_mae": 0.8017,
+        "nested_cv_mae_kind": 1.9193,
+        "default_mae": 0.9091,
+        "default_mae_kind": 3.5328,
+        "chosen": [
+          {
+            "fold": 0,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.45
+            ]
+          },
+          {
+            "fold": 1,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.4
+            ]
+          },
+          {
+            "fold": 2,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.5
+            ]
+          },
+          {
+            "fold": 3,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.45
+            ]
+          },
+          {
+            "fold": 4,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.45
+            ]
+          }
+        ]
+      },
+      "fit": {
+        "objective": "all_rows_mae",
+        "rows": "all",
+        "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
+        "seed": "zhyd-pka-split-v1",
+        "train_fraction": 0.8,
+        "fitting_rows": 932,
+        "fitting_clusters": 123,
+        "kind_rows": 82,
+        "grid": {
+          "model_pka": [
+            7.5,
+            10.5,
+            0.1
+          ],
+          "desolvation_scale": [
+            0.0,
+            1.5,
+            0.05
+          ]
+        },
+        "fixed": {
+          "version": "fixed",
+          "model_pka": {
+            "TYR": 10.0,
+            "HIS": 6.5
+          },
+          "desolvation_scale": {
+            "TYR": 1.0,
+            "HIS": 1.0
+          }
+        },
+        "canonical_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c"
+      }
+    },
+    "HIS": {
+      "kind": "HIS",
+      "selected": "desolvation_scale",
+      "model_pka": 6.5,
+      "desolvation_scale": 0.6,
+      "variants": {
+        "default": {
+          "model_pka": 6.5,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7938,
+          "train_mae_kind": 0.8917,
+          "cv_mae": 0.7938,
+          "cv_mae_kind": 0.8917
+        },
+        "model_pka": {
+          "model_pka": 6.9,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7811,
+          "train_mae_kind": 0.8278,
+          "cv_mae": 0.7836,
+          "cv_mae_kind": 0.8392
+        },
+        "desolvation_scale": {
+          "model_pka": 6.5,
+          "desolvation_scale": 0.6,
+          "train_mae": 0.7758,
+          "train_mae_kind": 0.8006,
+          "cv_mae": 0.7803,
+          "cv_mae_kind": 0.8176
+        },
+        "both": {
+          "model_pka": 6.7,
+          "desolvation_scale": 0.7,
+          "train_mae": 0.7755,
+          "train_mae_kind": 0.7984,
+          "cv_mae": 0.785,
+          "cv_mae_kind": 0.8388
+        }
+      },
+      "nested_cv": {
+        "folds": 5,
+        "nested_cv_mae": 0.7847,
+        "nested_cv_mae_kind": 0.8361,
+        "default_mae": 0.7938,
+        "default_mae_kind": 0.8917,
+        "chosen": [
+          {
+            "fold": 0,
+            "variant": "desolvation_scale",
+            "point": [
+              6.5,
+              0.5
+            ]
+          },
+          {
+            "fold": 1,
+            "variant": "model_pka",
+            "point": [
+              6.9,
+              1.0
+            ]
+          },
+          {
+            "fold": 2,
+            "variant": "model_pka",
+            "point": [
+              6.9,
+              1.0
+            ]
+          },
+          {
+            "fold": 3,
+            "variant": "desolvation_scale",
+            "point": [
+              6.5,
+              0.6
+            ]
+          },
+          {
+            "fold": 4,
+            "variant": "desolvation_scale",
+            "point": [
+              6.5,
+              0.6
+            ]
+          }
+        ]
+      },
+      "fit": {
+        "objective": "all_rows_mae",
+        "rows": "all",
+        "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
+        "seed": "zhyd-pka-split-v1",
+        "train_fraction": 0.8,
+        "fitting_rows": 932,
+        "fitting_clusters": 123,
+        "kind_rows": 198,
+        "grid": {
+          "model_pka": [
+            5.0,
+            8.0,
+            0.1
+          ],
+          "desolvation_scale": [
+            0.0,
+            1.5,
+            0.05
+          ]
+        },
+        "fixed": {
+          "version": "fixed",
+          "model_pka": {
+            "CYS": 7.5,
+            "TYR": 10.0
+          },
+          "desolvation_scale": {
+            "CYS": 0.45,
+            "TYR": 1.0
+          }
+        },
+        "canonical_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c"
+      }
+    }
+  },
+  "rejected": {
+    "TYR_unconstrained": {
+      "kind": "TYR",
+      "selected": "both",
+      "model_pka": 10.5,
+      "desolvation_scale": 0.15,
+      "variants": {
+        "default": {
+          "model_pka": 10.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7938,
+          "train_mae_kind": 1.6904,
+          "cv_mae": 0.7938,
+          "cv_mae_kind": 1.6904
+        },
+        "model_pka": {
+          "model_pka": 10.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7938,
+          "train_mae_kind": 1.6904,
+          "cv_mae": 0.8045,
+          "cv_mae_kind": 1.9711
+        },
+        "desolvation_scale": {
+          "model_pka": 10.0,
+          "desolvation_scale": 0.4,
+          "train_mae": 0.7812,
+          "train_mae_kind": 1.0832,
+          "cv_mae": 0.782,
+          "cv_mae_kind": 1.1106
+        },
+        "both": {
+          "model_pka": 10.5,
+          "desolvation_scale": 0.15,
+          "train_mae": 0.7781,
+          "train_mae_kind": 0.9776,
+          "cv_mae": 0.7788,
+          "cv_mae_kind": 1.0011
+        }
+      },
+      "nested_cv": {
+        "folds": 5,
+        "nested_cv_mae": 0.7934,
+        "nested_cv_mae_kind": 1.4897,
+        "default_mae": 0.7938,
+        "default_mae_kind": 1.6904,
+        "chosen": [
+          {
+            "fold": 0,
+            "variant": "both",
+            "point": [
+              10.6,
+              0.1
+            ]
+          },
+          {
+            "fold": 1,
+            "variant": "both",
+            "point": [
+              10.3,
+              0.25
+            ]
+          },
+          {
+            "fold": 2,
+            "variant": "both",
+            "point": [
+              10.5,
+              0.15
+            ]
+          },
+          {
+            "fold": 3,
+            "variant": "default",
+            "point": [
+              10.0,
+              1.0
+            ]
+          },
+          {
+            "fold": 4,
+            "variant": "both",
+            "point": [
+              10.5,
+              0.15
+            ]
+          }
+        ]
+      },
+      "fit": {
+        "objective": "all_rows_mae",
+        "rows": "all",
+        "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
+        "seed": "zhyd-pka-split-v1",
+        "train_fraction": 0.8,
+        "fitting_rows": 932,
+        "fitting_clusters": 123,
+        "kind_rows": 26,
+        "grid": {
+          "model_pka": [
+            8.5,
+            11.5,
+            0.1
+          ],
+          "desolvation_scale": [
+            0.0,
+            1.5,
+            0.05
+          ]
+        },
+        "fixed": {
+          "version": "fixed",
+          "model_pka": {
+            "CYS": 7.5,
+            "HIS": 6.5
+          },
+          "desolvation_scale": {
+            "CYS": 0.45,
+            "HIS": 1.0
+          }
+        },
+        "canonical_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c"
+      }
+    },
+    "TYR_scale_min_0.5": {
+      "kind": "TYR",
+      "selected": "desolvation_scale",
+      "model_pka": 10.0,
+      "desolvation_scale": 0.5,
+      "variants": {
+        "default": {
+          "model_pka": 10.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7938,
+          "train_mae_kind": 1.6904,
+          "cv_mae": 0.7938,
+          "cv_mae_kind": 1.6904
+        },
+        "model_pka": {
+          "model_pka": 10.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7938,
+          "train_mae_kind": 1.6904,
+          "cv_mae": 0.8045,
+          "cv_mae_kind": 1.9711
+        },
+        "desolvation_scale": {
+          "model_pka": 10.0,
+          "desolvation_scale": 0.5,
+          "train_mae": 0.7859,
+          "train_mae_kind": 1.246,
+          "cv_mae": 0.7869,
+          "cv_mae_kind": 1.2784
+        },
+        "both": {
+          "model_pka": 9.9,
+          "desolvation_scale": 0.5,
+          "train_mae": 0.7826,
+          "train_mae_kind": 1.1289,
+          "cv_mae": 0.7888,
+          "cv_mae_kind": 1.3461
+        }
+      },
+      "nested_cv": {
+        "folds": 5,
+        "nested_cv_mae": 0.7986,
+        "nested_cv_mae_kind": 1.7142,
+        "default_mae": 0.7938,
+        "default_mae_kind": 1.6904,
+        "chosen": [
+          {
+            "fold": 0,
+            "variant": "default",
+            "point": [
+              10.0,
+              1.0
+            ]
+          },
+          {
+            "fold": 1,
+            "variant": "desolvation_scale",
+            "point": [
+              10.0,
+              0.5
+            ]
+          },
+          {
+            "fold": 2,
+            "variant": "default",
+            "point": [
+              10.0,
+              1.0
+            ]
+          },
+          {
+            "fold": 3,
+            "variant": "default",
+            "point": [
+              10.0,
+              1.0
+            ]
+          },
+          {
+            "fold": 4,
+            "variant": "desolvation_scale",
+            "point": [
+              10.0,
+              0.5
+            ]
+          }
+        ]
+      },
+      "fit": {
+        "objective": "all_rows_mae",
+        "rows": "all",
+        "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
+        "seed": "zhyd-pka-split-v1",
+        "train_fraction": 0.8,
+        "fitting_rows": 932,
+        "fitting_clusters": 123,
+        "kind_rows": 26,
+        "grid": {
+          "model_pka": [
+            8.5,
+            11.5,
+            0.1
+          ],
+          "desolvation_scale": [
+            0.5,
+            1.5,
+            0.05
+          ]
+        },
+        "fixed": {
+          "version": "fixed",
+          "model_pka": {
+            "CYS": 7.5,
+            "HIS": 6.5
+          },
+          "desolvation_scale": {
+            "CYS": 0.45,
+            "HIS": 1.0
+          }
+        },
+        "canonical_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c"
+      }
+    }
+  }
+}
