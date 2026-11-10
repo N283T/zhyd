@@ -69,14 +69,15 @@ fitted. The record of the v1.1 fit is `params/zhyd-empirical-v1.1.json`.
 `--rows all` fits on every non-holdout row of a merged set built by
 `merge_sets.py` (clusters joined through RCSB 30 % sequence clusters), and
 `--nested-folds K` estimates the whole procedure by nested cluster CV. The
-v1.3 fit (PKAD-R + external set, every kind from the parity table) is
-`params/zhyd-empirical-v1.3.json`:
+v1.4 fit (PKAD-R + external set with Q9, every kind from the parity table,
+desolvation scale ≥ 0.5) is `params/zhyd-empirical-v1.4.json` (v1.3:
+`params/zhyd-empirical-v1.3.json`):
 
 ```sh
 python3 scripts/pka/merge_sets.py pkadr=canonical.csv external=external.csv \
     --clusters clusters-by-entity-30.txt -o merged.csv
 python3 scripts/pka/calibrate_empirical.py merged.csv --structures all_structures/ \
-    --kind CYS --rows all --nested-folds 5 --scale-min 0.0 -o cys.json
+    --kind CYS --rows all --nested-folds 5 --scale-min 0.5 -o cys.json
 ```
 
 `normalize` keeps numeric, PDB-mapped entries for supported sites and records

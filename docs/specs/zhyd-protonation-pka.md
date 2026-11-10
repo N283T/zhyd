@@ -2,7 +2,7 @@
 
 Status: three pKa engines. PROPKA 3.5.1 via the optional zpropka port
 (reference method, reproduces `propka3`), the experimental MIT empirical
-engine (zhyd mode `zhyd-empirical-v1.3`, the default engine without
+engine (zhyd mode `zhyd-empirical-v1.4`, the default engine without
 PROPKA; parity mode `zhyd-empirical-v1-parity`), and the earlier experimental
 built-in model (`zhyd-pka-protein-v0.2`, fitted, not accepted for
 production). Schema v1. pH-driven state application (`run --ph`, Phase 4)
@@ -342,20 +342,22 @@ is available in override files. `--state-json` reports these sites with
 source `pka_predicted` and the chosen tautomer or oxygen.
 
 **State agreement at pH 7** (sites whose experimental pKa is on the same
-side of 7 as the applied state):
+side of 7 as the applied state, both counted as protonated at pKa ≥ 7), with
+the default engine `zhyd-empirical-v1.4`:
 
 | Set | Default states | `--ph 7` |
 |---|---|---|
-| Fitting rows, HIS/ASP/GLU/LYS/CYS (841) | 734 | 756 |
-| Literature set 2026-11 (38) | 38 | 35 |
+| Fitting rows, HIS/ASP/GLU/LYS/CYS (841) | 728 | 746 |
+| Literature set 2026-11 (38) | 38 | 36 |
 
-The fitting-row gain is in-sample for CYS and HIS (their parameters were
-fitted on these rows). The literature set is mostly His with pKa below 7, so
-the default is always right there and only losses can show: LCC-ICCG His242
-in two structures and HCA II His107 (the acid–base pair threshold, see the
-empirical engine specification). The states applied by `run --ph 7` agree
-with the `pka` report's recommended states at every one of 659 compared
-sites.
+The gate study above used v1.3 predictions (the engine of the time). For
+comparison, the same fitting-row count is 752 under v1.3 and 753 under
+v1.3 + Q9 (see the empirical engine specification, r8). The fitting-row gain is in-sample for
+CYS, TYR and HIS (their parameters were fitted on these rows). The
+literature set is mostly His with pKa below 7, so the default is always
+right there and only losses can show: LCC-ICCG His242 in two structures.
+The states applied by `run --ph 7` agree with the `pka` report's
+recommended states at every one of 659 compared sites.
 
 Open: anti carboxylic acid conformers; ensemble or microstate treatment of
 coupled sites (Phase 5); the acid–base pair threshold (Q9 candidate).

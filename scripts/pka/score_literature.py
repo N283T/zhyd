@@ -28,7 +28,7 @@ def experimental_state(row: dict[str, str], ph: float) -> bool | None:
     value = float(row["experimental_pka"])
     if row["value_qualifier"] == "upper_bound":
         return False if value <= ph else None
-    return value > ph
+    return value >= ph
 
 
 def score(rows: list[dict[str, str]], reports: Path, ph: float) -> dict:
@@ -60,7 +60,7 @@ def score(rows: list[dict[str, str]], reports: Path, ph: float) -> dict:
         expected = experimental_state(row, ph)
         if expected is not None:
             states += 1
-            if (predicted > ph) == expected:
+            if (predicted >= ph) == expected:
                 agree += 1
             else:
                 flips.append(
