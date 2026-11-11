@@ -1,0 +1,48 @@
+entry_id,pdb_id,chain,auth_seq_id,site,experimental_pka,classification,mutant,cluster_id,holdout_family,protein_name,lead_id,condition,value_qualifier
+L01-7WIO-A40-300mM_NaCl,7WIO,A,40,ASP,6.4,literature-2026-11,,L01,,MaSp1 NTD,L01,300mM_NaCl,point
+L01-7WIO-A79-0mM_NaCl,7WIO,A,79,GLU,6.6,literature-2026-11,,L01,,MaSp1 NTD,L01,0mM_NaCl,point
+L01-7WIO-A79-300mM_NaCl,7WIO,A,79,GLU,6.0,literature-2026-11,,L01,,MaSp1 NTD,L01,300mM_NaCl,point
+L01-7WIO-A84-0mM_NaCl,7WIO,A,84,GLU,4.4,literature-2026-11,,L01,,MaSp1 NTD,L01,0mM_NaCl,point
+L01-7WIO-A84-300mM_NaCl,7WIO,A,84,GLU,4.6,literature-2026-11,,L01,,MaSp1 NTD,L01,300mM_NaCl,point
+L01-7WIO-A119-0mM_NaCl,7WIO,A,119,GLU,6.3,literature-2026-11,,L01,,MaSp1 NTD,L01,0mM_NaCl,point
+L01-7WIO-A119-300mM_NaCl,7WIO,A,119,GLU,6.1,literature-2026-11,,L01,,MaSp1 NTD,L01,300mM_NaCl,point
+L01-8GS7-A41-0mM_NaCl,8GS7,A,41,ASP,7.1,literature-2026-11,,L01,,MaSp2 NTD,L01,0mM_NaCl,point
+L01-8GS7-A41-300mM_NaCl,8GS7,A,41,ASP,6.3,literature-2026-11,,L01,,MaSp2 NTD,L01,300mM_NaCl,point
+L01-8GS7-A80-0mM_NaCl,8GS7,A,80,GLU,6.8,literature-2026-11,,L01,,MaSp2 NTD,L01,0mM_NaCl,point
+L01-8GS7-A80-300mM_NaCl,8GS7,A,80,GLU,5.7,literature-2026-11,,L01,,MaSp2 NTD,L01,300mM_NaCl,point
+L01-8GS7-A85-0mM_NaCl,8GS7,A,85,GLU,4.4,literature-2026-11,,L01,,MaSp2 NTD,L01,0mM_NaCl,point
+L01-8GS7-A85-300mM_NaCl,8GS7,A,85,GLU,4.5,literature-2026-11,,L01,,MaSp2 NTD,L01,300mM_NaCl,point
+L01-8GS7-A120-0mM_NaCl,8GS7,A,120,GLU,6.2,literature-2026-11,,L01,,MaSp2 NTD,L01,0mM_NaCl,point
+L01-8GS7-A120-300mM_NaCl,8GS7,A,120,GLU,5.5,literature-2026-11,,L01,,MaSp2 NTD,L01,300mM_NaCl,point
+L02-7YL8-A64-303K,7YL8,A,64,ASP,4.9,literature-2026-11,,L02,,BtFd oxidized,L02,303K,point
+L02-7YL8-A74-303K,7YL8,A,74,ASP,5.0,literature-2026-11,,L02,,BtFd oxidized,L02,303K,point
+L20-6THT-A242-30C,6THT,A,242,HIS,4.79,literature-2026-11,S165A,L20,,LCC-ICCG S165A,L20,30C,point
+L20-8OTA-A242-30C,8OTA,A,242,HIS,4.90,literature-2026-11,,L20,,LCC-ICCG,L20,30C,point
+L20-8OTA-A112-30C,8OTA,A,112,HIS,4.0,literature-2026-11,,L20,,LCC-ICCG,L20,30C,upper_bound
+L20-8OTA-A164-30C,8OTA,A,164,HIS,4.0,literature-2026-11,,L20,,LCC-ICCG,L20,30C,upper_bound
+L20-8OTA-A191-30C,8OTA,A,191,HIS,4.0,literature-2026-11,,L20,,LCC-ICCG,L20,30C,upper_bound
+L20-8OTA-A218-30C,8OTA,A,218,HIS,4.0,literature-2026-11,,L20,,LCC-ICCG,L20,30C,upper_bound
+L20-8OTA-A291-30C,8OTA,A,291,HIS,4.0,literature-2026-11,,L20,,LCC-ICCG,L20,30C,upper_bound
+L27-4RHW_E-E38-unknown_T,4RHW_E,E,38,HIS,6.03,literature-2026-11,,L27,,caspase-9 CARD,L27,unknown_T,point
+L35-1RYA-A124-sat_Mg,1RYA,A,124,HIS,6.94,literature-2026-11,,L35,,GDPMH,L35,sat_Mg,point
+L35-1RYA-A88-sat_Mg,1RYA,A,88,HIS,5.5,literature-2026-11,,L35,,GDPMH,L35,sat_Mg,upper_bound
+L35-1RYA-A102-sat_Mg,1RYA,A,102,HIS,5.5,literature-2026-11,,L35,,GDPMH,L35,sat_Mg,upper_bound
+L35-1RYA-A142-sat_Mg,1RYA,A,142,HIS,5.5,literature-2026-11,,L35,,GDPMH,L35,sat_Mg,upper_bound
+L13-4Y0J-A3-308K,4Y0J,A,3,HIS,6.1,known-protein-new-site,,L13,,HCA II,L13,308K,point
+L13-4Y0J-A4-308K,4Y0J,A,4,HIS,6.2,known-protein-new-site,,L13,,HCA II,L13,308K,point
+L13-4Y0J-A10-308K,4Y0J,A,10,HIS,5.6,known-protein-new-site,,L13,,HCA II,L13,308K,point
+L13-4Y0J-A15-308K,4Y0J,A,15,HIS,5.6,known-protein-new-site,,L13,,HCA II,L13,308K,point
+L13-4Y0J-A17-308K,4Y0J,A,17,HIS,5.6,known-protein-new-site,,L13,,HCA II,L13,308K,point
+L13-4Y0J-A36-308K,4Y0J,A,36,HIS,6.94,known-protein-new-site,,L13,,HCA II,L13,308K,point
+L13-4Y0J-A107-308K,4Y0J,A,107,HIS,3.5,known-protein-new-site,,L13,,HCA II,L13,308K,upper_bound
+L13-4Y0J-A122-308K,4Y0J,A,122,HIS,3.5,known-protein-new-site,,L13,,HCA II,L13,308K,upper_bound
+L32-1A6F-A3-folded_20mM_Na2SO4_25C,1A6F,A,3,HIS,6.31,literature-2026-11,F107W,L32,,RNase P protein (F107W measured),L32,folded_20mM_Na2SO4_25C,point
+L32-1A6F-A22-folded_20mM_Na2SO4_25C,1A6F,A,22,HIS,6.03,literature-2026-11,F107W,L32,,RNase P protein (F107W measured),L32,folded_20mM_Na2SO4_25C,point
+L32-1A6F-A105-folded_20mM_Na2SO4_25C,1A6F,A,105,HIS,5.52,literature-2026-11,F107W,L32,,RNase P protein (F107W measured),L32,folded_20mM_Na2SO4_25C,point
+L23-1UBQ-A6-23C,1UBQ,A,6,LYS,10.47,known-protein-new-site,,L23,,ubiquitin,L23,23C,point
+L23-1UBQ-A48-23C,1UBQ,A,48,LYS,10.53,known-protein-new-site,,L23,,ubiquitin,L23,23C,point
+L23-1UBQ-A33-23C,1UBQ,A,33,LYS,10.88,known-protein-new-site,,L23,,ubiquitin,L23,23C,point
+L23-1UBQ-A63-23C,1UBQ,A,63,LYS,11.03,known-protein-new-site,,L23,,ubiquitin,L23,23C,point
+L23-1UBQ-A27-23C,1UBQ,A,27,LYS,11.2,known-protein-new-site,,L23,,ubiquitin,L23,23C,point
+L23-1UBQ-A11-23C,1UBQ,A,11,LYS,11.47,known-protein-new-site,,L23,,ubiquitin,L23,23C,point
+L23-1UBQ-A29-23C,1UBQ,A,29,LYS,11.68,known-protein-new-site,,L23,,ubiquitin,L23,23C,point

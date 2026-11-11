@@ -1,0 +1,404 @@
+{
+  "parameters": {
+    "version": "zhyd-empirical-v1.2",
+    "model_pka": {
+      "CYS": 7.5,
+      "HIS": 6.8
+    },
+    "desolvation_scale": {
+      "CYS": 0.45,
+      "TYR": 0.0,
+      "HIS": 0.75
+    }
+  },
+  "note": "Fit record only (not a --parameters input). Values are built into src/pka_empirical/params.zig (calibrated). Kinds were fitted in order CYS, TYR, HIS, each with the earlier ones fixed, on top of the v1.1 table; a kind is kept only if its nested 5-fold cluster CV MAE beats the default. CYS model pKa sits on the lower grid bound (default - 1.5) and TYR desolvation on 0.",
+  "fits": {
+    "CYS": {
+      "kind": "CYS",
+      "selected": "both",
+      "model_pka": 7.5,
+      "desolvation_scale": 0.45,
+      "variants": {
+        "default": {
+          "model_pka": 9.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.8915,
+          "train_mae_kind": 3.5618,
+          "cv_mae": 0.8915,
+          "cv_mae_kind": 3.5618
+        },
+        "model_pka": {
+          "model_pka": 7.5,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.8246,
+          "train_mae_kind": 2.4604,
+          "cv_mae": 0.8246,
+          "cv_mae_kind": 2.4604
+        },
+        "desolvation_scale": {
+          "model_pka": 9.0,
+          "desolvation_scale": 0.0,
+          "train_mae": 0.8046,
+          "train_mae_kind": 2.1699,
+          "cv_mae": 0.8094,
+          "cv_mae_kind": 2.2492
+        },
+        "both": {
+          "model_pka": 7.5,
+          "desolvation_scale": 0.45,
+          "train_mae": 0.7811,
+          "train_mae_kind": 1.7755,
+          "cv_mae": 0.7925,
+          "cv_mae_kind": 1.9644
+        }
+      },
+      "nested_cv": {
+        "folds": 5,
+        "nested_cv_mae": 0.7898,
+        "nested_cv_mae_kind": 1.9204,
+        "default_mae": 0.8915,
+        "default_mae_kind": 3.5618,
+        "chosen": [
+          {
+            "fold": 0,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.45
+            ]
+          },
+          {
+            "fold": 1,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.4
+            ]
+          },
+          {
+            "fold": 2,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.45
+            ]
+          },
+          {
+            "fold": 3,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.45
+            ]
+          },
+          {
+            "fold": 4,
+            "variant": "both",
+            "point": [
+              7.5,
+              0.45
+            ]
+          }
+        ]
+      },
+      "fit": {
+        "objective": "all_rows_mae",
+        "rows": "all",
+        "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
+        "seed": "zhyd-pka-split-v1",
+        "train_fraction": 0.8,
+        "fitting_rows": 932,
+        "fitting_clusters": 123,
+        "kind_rows": 82,
+        "grid": {
+          "model_pka": [
+            7.5,
+            10.5,
+            0.1
+          ],
+          "desolvation_scale": [
+            0.0,
+            1.5,
+            0.05
+          ]
+        },
+        "fixed": {},
+        "canonical_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c"
+      }
+    },
+    "TYR": {
+      "kind": "TYR",
+      "selected": "desolvation_scale",
+      "model_pka": 10.0,
+      "desolvation_scale": 0.0,
+      "variants": {
+        "default": {
+          "model_pka": 10.0,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.8014,
+          "train_mae_kind": 1.9947,
+          "cv_mae": 0.8014,
+          "cv_mae_kind": 1.9947
+        },
+        "model_pka": {
+          "model_pka": 9.7,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.8001,
+          "train_mae_kind": 1.9673,
+          "cv_mae": 0.8028,
+          "cv_mae_kind": 2.0343
+        },
+        "desolvation_scale": {
+          "model_pka": 10.0,
+          "desolvation_scale": 0.0,
+          "train_mae": 0.7812,
+          "train_mae_kind": 1.0433,
+          "cv_mae": 0.7945,
+          "cv_mae_kind": 1.4918
+        },
+        "both": {
+          "model_pka": 10.6,
+          "desolvation_scale": 0.1,
+          "train_mae": 0.7795,
+          "train_mae_kind": 1.2007,
+          "cv_mae": 0.7949,
+          "cv_mae_kind": 1.5321
+        }
+      },
+      "nested_cv": {
+        "folds": 5,
+        "nested_cv_mae": 0.7904,
+        "nested_cv_mae_kind": 1.3608,
+        "default_mae": 0.8014,
+        "default_mae_kind": 1.9947,
+        "chosen": [
+          {
+            "fold": 0,
+            "variant": "both",
+            "point": [
+              10.6,
+              0.1
+            ]
+          },
+          {
+            "fold": 1,
+            "variant": "both",
+            "point": [
+              9.9,
+              0.0
+            ]
+          },
+          {
+            "fold": 2,
+            "variant": "desolvation_scale",
+            "point": [
+              10.0,
+              0.0
+            ]
+          },
+          {
+            "fold": 3,
+            "variant": "both",
+            "point": [
+              10.5,
+              0.15
+            ]
+          },
+          {
+            "fold": 4,
+            "variant": "desolvation_scale",
+            "point": [
+              10.0,
+              0.0
+            ]
+          }
+        ]
+      },
+      "fit": {
+        "objective": "all_rows_mae",
+        "rows": "all",
+        "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
+        "seed": "zhyd-pka-split-v1",
+        "train_fraction": 0.8,
+        "fitting_rows": 932,
+        "fitting_clusters": 123,
+        "kind_rows": 26,
+        "grid": {
+          "model_pka": [
+            8.5,
+            11.5,
+            0.1
+          ],
+          "desolvation_scale": [
+            0.0,
+            1.5,
+            0.05
+          ]
+        },
+        "fixed": {
+          "version": "fixed",
+          "model_pka": {
+            "CYS": 7.5
+          },
+          "desolvation_scale": {
+            "CYS": 0.45
+          }
+        },
+        "canonical_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c"
+      }
+    },
+    "HIS": {
+      "kind": "HIS",
+      "selected": "both",
+      "model_pka": 6.8,
+      "desolvation_scale": 0.75,
+      "variants": {
+        "default": {
+          "model_pka": 6.5,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7812,
+          "train_mae_kind": 0.9213,
+          "cv_mae": 0.7812,
+          "cv_mae_kind": 0.9213
+        },
+        "model_pka": {
+          "model_pka": 6.9,
+          "desolvation_scale": 1.0,
+          "train_mae": 0.7652,
+          "train_mae_kind": 0.8315,
+          "cv_mae": 0.7652,
+          "cv_mae_kind": 0.8315
+        },
+        "desolvation_scale": {
+          "model_pka": 6.5,
+          "desolvation_scale": 0.6,
+          "train_mae": 0.7622,
+          "train_mae_kind": 0.8148,
+          "cv_mae": 0.767,
+          "cv_mae_kind": 0.8342
+        },
+        "both": {
+          "model_pka": 6.8,
+          "desolvation_scale": 0.75,
+          "train_mae": 0.7586,
+          "train_mae_kind": 0.7984,
+          "cv_mae": 0.764,
+          "cv_mae_kind": 0.8233
+        }
+      },
+      "nested_cv": {
+        "folds": 5,
+        "nested_cv_mae": 0.7702,
+        "nested_cv_mae_kind": 0.8475,
+        "default_mae": 0.7812,
+        "default_mae_kind": 0.9213,
+        "chosen": [
+          {
+            "fold": 0,
+            "variant": "desolvation_scale",
+            "point": [
+              6.5,
+              0.45
+            ]
+          },
+          {
+            "fold": 1,
+            "variant": "both",
+            "point": [
+              6.7,
+              0.7
+            ]
+          },
+          {
+            "fold": 2,
+            "variant": "model_pka",
+            "point": [
+              6.9,
+              1.0
+            ]
+          },
+          {
+            "fold": 3,
+            "variant": "desolvation_scale",
+            "point": [
+              6.5,
+              0.7
+            ]
+          },
+          {
+            "fold": 4,
+            "variant": "both",
+            "point": [
+              6.8,
+              0.75
+            ]
+          }
+        ]
+      },
+      "fit": {
+        "objective": "all_rows_mae",
+        "rows": "all",
+        "selection": "lowest leave-one-cluster-out CV MAE over the fitting rows",
+        "seed": "zhyd-pka-split-v1",
+        "train_fraction": 0.8,
+        "fitting_rows": 932,
+        "fitting_clusters": 123,
+        "kind_rows": 198,
+        "grid": {
+          "model_pka": [
+            5.0,
+            8.0,
+            0.1
+          ],
+          "desolvation_scale": [
+            0.0,
+            1.5,
+            0.05
+          ]
+        },
+        "fixed": {
+          "version": "fixed",
+          "model_pka": {
+            "CYS": 7.5,
+            "TYR": 10.0
+          },
+          "desolvation_scale": {
+            "CYS": 0.45,
+            "TYR": 0.0
+          }
+        },
+        "canonical_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c"
+      }
+    }
+  },
+  "data": {
+    "fitting_rows": "all non-SNase rows of PKAD-R (scripts/pka/pkadr.py normalize) merged with the external set (scripts/pka/external_set.py) by scripts/pka/merge_sets.py",
+    "clusters": "union of PKAD-R clusters, PDB entry and RCSB 30% sequence clusters (clusters-by-entity-30.txt)",
+    "merged_csv_sha256": "b2bb08ce573787cacb2141a72e42388adf304de39aef8077a8efeb34b2773b7c",
+    "pkadr_json_sha256": "9ee3cfb885306ca944e177c9b21fa700dd19b8cc985e4bdb08f42513ae269937",
+    "pkad3_v2_sha256": "f24b26b1c419786a07583872d610838e2cccaa2aafa1a0df88b23d0cbf727262",
+    "rcsb_clusters_sha256": "60834fc4894a96f95e42efd647e26ce91adec7db1822d35ef2832c6f81711224",
+    "sources": [
+      "PKAD-R (Chen et al., J Comput Biophys Chem 2025)",
+      "PKAD-3_V2 and time-stamped set from KaML-ESM (Shen et al., CC BY-NC 4.0; values used for fitting, data not redistributed)"
+    ]
+  },
+  "results": {
+    "merged_fitting_mae": {
+      "v1.2": 0.7586,
+      "v1.1_table": 0.7913,
+      "parity_table": 0.8915
+    },
+    "per_kind_fitting_mae_v1.2": {
+      "CYS": 1.787,
+      "TYR": 1.048,
+      "HIS": 0.798
+    },
+    "snase_stress_mae": {
+      "v1.2": 0.981,
+      "v1.1": 0.924,
+      "null": 2.006
+    },
+    "note": "The external set is now fitting data, so it no longer gives an independent estimate; nested CV MAE per kind is in fits.*.nested_cv."
+  }
+}

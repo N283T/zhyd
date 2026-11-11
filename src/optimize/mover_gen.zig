@@ -2,8 +2,11 @@
 //!
 //! Inspects `mover_hint` on each added hydrogen atom, resolves axis/center
 //! atoms from placement plans, and delegates to rotator constructors.
-//! Supports single-H rotators, methyl rotators, NH3 rotators,
-//! amide flippers (ASN/GLN), and histidine ring flippers.
+//! Supports single-H rotators, NH3 rotators, NH2 rotators,
+//! amide flippers (ASN/GLN), and histidine ring flippers. Methyl groups get
+//! no mover: they stay staggered as placed. The scoring has no torsion term,
+//! so letting contacts rotate them only pushed them toward eclipsed, and
+//! their thousands of movers merged most of a protein into one clique.
 
 const std = @import("std");
 const log = std.log.scoped(.mover_gen);
@@ -11,6 +14,7 @@ const model_mod = @import("../model.zig");
 const Model = model_mod.Model;
 const Atom = model_mod.Atom;
 const Residue = model_mod.Residue;
+const Vec3 = @import("../math.zig").Vec3(f32);
 const mover_mod = @import("mover.zig");
 const Mover = mover_mod.Mover;
 const rotator = @import("rotator.zig");
@@ -148,6 +152,41 @@ fn resolveCcdRotatorAtoms(
 /// N-terminal NH3+ and PRO NH2+ groups rotate around the N-CA bond:
 ///   center = N, axis = CA.
 /// Returns true if h_name matches a known N-terminal H name.
+const RotatorAtoms = struct { center: u32, axis: u32 };
+
+/// Longest H–heavy bond accepted when the rotator center is found by distance.
+const max_h_bond = 1.25;
+/// Longest heavy–heavy bond accepted for the rotation axis.
+const max_heavy_bond = 2.0;
+
+/// Resolve a single-H rotator's center and axis from coordinates: the center
+/// is the heavy atom of the residue nearest the H (within a bond length) and
+/// the axis is the heavy atom nearest the center. Used when no plan or
+/// dictionary names them, e.g. the 3'-terminal HO3' or H placed by
+/// distance-based bond inference.
+fn resolveGeometricRotatorAtoms(atoms: []const Atom, res: Residue, h: *const Atom) ?RotatorAtoms {
+    const center = nearestHeavy(atoms, res, h.pos, h.altloc, null, max_h_bond) orelse return null;
+    const axis = nearestHeavy(atoms, res, atoms[center].pos, h.altloc, center, max_heavy_bond) orelse return null;
+    return .{ .center = center, .axis = axis };
+}
+
+fn nearestHeavy(atoms: []const Atom, res: Residue, pos: Vec3, altloc: u8, exclude: ?u32, max_dist: f32) ?u32 {
+    var best: ?u32 = null;
+    var best_d2: f32 = max_dist * max_dist;
+    for (atoms[res.atom_start..res.atom_end], res.atom_start..) |*a, i| {
+        if (a.is_hydrogen) continue;
+        if (exclude) |e| if (e == i) continue;
+        if (a.altloc != ' ' and altloc != ' ' and a.altloc != altloc) continue;
+        const v = a.pos.sub(pos);
+        const d2 = v.dot(v);
+        if (d2 <= best_d2) {
+            best_d2 = d2;
+            best = @intCast(i);
+        }
+    }
+    return best;
+}
+
 fn resolveNtermRotatorAtoms(h_name: []const u8, center_out: *[4]u8, axis_out: *[4]u8) bool {
     const is_nterm_h = std.mem.eql(u8, h_name, "H1") or
         std.mem.eql(u8, h_name, "H2") or
@@ -204,7 +243,8 @@ pub fn generateMovers(
         const comp_id = res.compIdSlice();
         const h_name = atom.nameSlice();
         const target_altloc = atom.altloc;
-        const residue_state = if (overrides) |ov| ov.find(mdl, residue_idx) else null;
+        const residue_entry = if (overrides) |ov| ov.findEntry(mdl, residue_idx) else null;
+        const residue_state: ?protonation.ResidueState = if (residue_entry) |e| e.state else null;
 
         // Per-component dict fallback: inline_dict first, then ccd_dict.
         const effective_dict: ?*const ComponentDict = blk: {
@@ -216,39 +256,42 @@ pub fn generateMovers(
 
         switch (atom.mover_hint) {
             .rotate => {
-                // Single H rotator (OH, SH, etc.)
-                // Try standard plan first, fall back to CCD topology
+                // Single H rotator (OH, SH, etc.). The standard plan or the
+                // dictionary names the center and axis; otherwise they come
+                // from coordinates (3'-terminal HO3', distance-inferred H).
+                // H names alone are not used: ligand H named H1/H2/H3 are
+                // not N-terminal amine H.
                 var center_name_buf: [4]u8 = undefined;
                 var axis_name_buf: [4]u8 = undefined;
-                var center_name: []const u8 = undefined;
-                var axis_name: []const u8 = undefined;
-
-                if (findPlanForH(comp_id, h_name)) |plan| {
+                const named = if (findPlanForH(comp_id, h_name)) |plan| blk: {
                     center_name_buf = plan.connected[0];
                     axis_name_buf = plan.connected[1];
-                    center_name = trimName(&center_name_buf);
-                    axis_name = trimName(&axis_name_buf);
-                } else if (resolveCcdRotatorAtoms(effective_dict, comp_id, h_name, &center_name_buf, &axis_name_buf)) {
-                    center_name = trimName(&center_name_buf);
-                    axis_name = trimName(&axis_name_buf);
-                } else if (resolveNtermRotatorAtoms(h_name, &center_name_buf, &axis_name_buf)) {
-                    center_name = trimName(&center_name_buf);
-                    axis_name = trimName(&axis_name_buf);
+                    break :blk true;
+                } else resolveCcdRotatorAtoms(effective_dict, comp_id, h_name, &center_name_buf, &axis_name_buf);
+
+                var center_idx: u32 = undefined;
+                var axis_idx: u32 = undefined;
+                if (named) {
+                    const center_name = trimName(&center_name_buf);
+                    const axis_name = trimName(&axis_name_buf);
+                    center_idx = findAtomIdx(atoms, res, residue_idx, center_name, target_altloc, mdl.original_atom_count) orelse {
+                        log.warn("center atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ center_name, h_name, comp_id, residue_idx });
+                        n_skipped += 1;
+                        continue;
+                    };
+                    axis_idx = findAtomIdx(atoms, res, residue_idx, axis_name, target_altloc, mdl.original_atom_count) orelse {
+                        log.warn("axis atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ axis_name, h_name, comp_id, residue_idx });
+                        n_skipped += 1;
+                        continue;
+                    };
+                } else if (resolveGeometricRotatorAtoms(atoms, res, atom)) |ra| {
+                    center_idx = ra.center;
+                    axis_idx = ra.axis;
                 } else {
-                    log.warn("no plan for H '{s}' in {s} (res {d}), skipping rotator", .{ h_name, comp_id, residue_idx });
+                    log.warn("no bonded heavy atoms found for H '{s}' in {s} (res {d}), skipping rotator", .{ h_name, comp_id, residue_idx });
                     n_skipped += 1;
                     continue;
                 }
-                const center_idx = findAtomIdx(atoms, res, residue_idx, center_name, target_altloc, mdl.original_atom_count) orelse {
-                    log.warn("center atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ center_name, h_name, comp_id, residue_idx });
-                    n_skipped += 1;
-                    continue;
-                };
-                const axis_idx = findAtomIdx(atoms, res, residue_idx, axis_name, target_altloc, mdl.original_atom_count) orelse {
-                    log.warn("axis atom '{s}' not found for H '{s}' in {s} (res {d}), skipping", .{ axis_name, h_name, comp_id, residue_idx });
-                    n_skipped += 1;
-                    continue;
-                };
                 const h_idx: u32 = @intCast(idx);
 
                 const mover = try rotator.createSingleHRotator(
@@ -325,9 +368,10 @@ pub fn generateMovers(
                 );
                 try movers.append(allocator, mover);
             },
-            .rotate_methyl, .rotate_nh3 => {
+            .rotate_methyl => continue,
+            .rotate_nh3 => {
                 if (residue_state) |state| {
-                    if (state == .lys and state.lys == .neutral and atom.mover_hint == .rotate_nh3) continue;
+                    if (state == .lys and state.lys == .neutral) continue;
                 }
                 // Group rotator: 3 H atoms share same center.
                 // Try standard plan first, fall back to CCD topology.
@@ -401,25 +445,14 @@ pub fn generateMovers(
                     continue;
                 }
 
-                const mover = switch (atom.mover_hint) {
-                    .rotate_methyl => try rotator.createMethylRotator(
-                        allocator,
-                        atoms,
-                        h_indices,
-                        center_idx,
-                        axis_idx,
-                        residue_idx,
-                    ),
-                    .rotate_nh3 => try rotator.createNH3Rotator(
-                        allocator,
-                        atoms,
-                        h_indices,
-                        center_idx,
-                        axis_idx,
-                        residue_idx,
-                    ),
-                    else => continue,
-                };
+                const mover = try rotator.createNH3Rotator(
+                    allocator,
+                    atoms,
+                    h_indices,
+                    center_idx,
+                    axis_idx,
+                    residue_idx,
+                );
                 try movers.append(allocator, mover);
             },
             .flip_amide => {
@@ -493,8 +526,14 @@ pub fn generateMovers(
                 try movers.append(allocator, m);
             },
             .flip_his => {
-                if (residue_state) |state| {
-                    if (state == .his and state.his != .auto) continue;
+                // A user's explicit tautomer pins the ring. A pKa-derived HIP
+                // fixes only the charge: the ring may still flip.
+                var charged = false;
+                if (residue_entry) |entry| {
+                    if (entry.state == .his and entry.state.his != .auto) {
+                        if (entry.source != .pka or entry.state.his != .hip) continue;
+                        charged = true;
+                    }
                 }
                 if (no_flip) continue;
 
@@ -528,6 +567,11 @@ pub fn generateMovers(
                 // H atoms are optional
                 const hd1_idx = findAtomIdx(atoms, res, residue_idx, "HD1", target_altloc, mdl.original_atom_count);
                 const he2_idx = findAtomIdx(atoms, res, residue_idx, "HE2", target_altloc, mdl.original_atom_count);
+                if (charged and (hd1_idx == null or he2_idx == null)) {
+                    log.warn("HIP flip needs both HD1 and HE2 (res {d}), skipping", .{residue_idx});
+                    n_skipped += 1;
+                    continue;
+                }
 
                 const m = try flipper.createHisFlipper(
                     allocator,
@@ -540,7 +584,35 @@ pub fn generateMovers(
                     he2_idx,
                     residue_idx,
                     mode,
+                    charged,
                 );
+                try movers.append(allocator, m);
+            },
+            .flip_carboxyl => {
+                // One mover per residue and altloc, built from either H.
+                const group_key = GroupKey{ .residue_idx = residue_idx, .center_name = .{ 'C', 'O', 'O', 'H' }, .altloc = target_altloc };
+                const gop = try seen_groups.getOrPut(allocator, group_key);
+                if (gop.found_existing) continue;
+                const names: [5][]const u8 = if (std.mem.eql(u8, comp_id, "ASP"))
+                    .{ "OD1", "OD2", "CG", "HD1", "HD2" }
+                else if (std.mem.eql(u8, comp_id, "GLU"))
+                    .{ "OE1", "OE2", "CD", "HE1", "HE2" }
+                else
+                    continue;
+                var carboxyl_idx: [5]u32 = undefined;
+                var found = true;
+                for (names, 0..) |name, k| {
+                    carboxyl_idx[k] = findAtomIdx(atoms, res, residue_idx, name, target_altloc, mdl.original_atom_count) orelse {
+                        found = false;
+                        break;
+                    };
+                }
+                if (!found) {
+                    log.warn("carboxyl flip atoms missing in {s} (res {d}), skipping", .{ comp_id, residue_idx });
+                    n_skipped += 1;
+                    continue;
+                }
+                const m = try flipper.createCarboxylFlipper(allocator, atoms, carboxyl_idx[0], carboxyl_idx[1], carboxyl_idx[2], carboxyl_idx[3], carboxyl_idx[4], residue_idx, mode);
                 try movers.append(allocator, m);
             },
             .none => continue,
@@ -616,6 +688,31 @@ test "findPlanForH finds nucleotide plans" {
     try testing.expect(findPlanForH("DA", "HX9") == null);
 }
 
+test "resolveGeometricRotatorAtoms finds the bonded O and its heavy neighbor, not N" {
+    // A ligand hydroxyl H named H1, as in FAD: the H name must not send the
+    // lookup to an N-terminal N. Atom 0 (P) is the O's neighbor, atom 2 (N)
+    // is farther from the O than P, atom 3 is the H.
+    var atoms = [_]Atom{
+        .{ .pos = .{ .x = 0, .y = 0, .z = 0 }, .is_hydrogen = false },
+        .{ .pos = .{ .x = 1.6, .y = 0, .z = 0 }, .is_hydrogen = false },
+        .{ .pos = .{ .x = 4.0, .y = 0, .z = 0 }, .is_hydrogen = false },
+        .{ .pos = .{ .x = 1.9, .y = 0.92, .z = 0 }, .is_hydrogen = true },
+    };
+    atoms[0].setName("P");
+    atoms[1].setName("O1A");
+    atoms[2].setName("N");
+    atoms[3].setName("H1");
+    const res = Residue{ .atom_start = 0, .atom_end = 3 };
+    const ra = resolveGeometricRotatorAtoms(&atoms, res, &atoms[3]).?;
+    try testing.expectEqual(@as(u32, 1), ra.center);
+    try testing.expectEqual(@as(u32, 0), ra.axis);
+
+    // An H with no heavy atom within bonding distance resolves to nothing.
+    var far = atoms[3];
+    far.pos = .{ .x = 10, .y = 10, .z = 10 };
+    try testing.expect(resolveGeometricRotatorAtoms(&atoms, res, &far) == null);
+}
+
 test "findAtomIdx prefers exact altloc and falls back to blank" {
     const source = @embedFile("../test_data/ala_altloc.cif");
     var mdl = try mmcif.parseModel(testing.allocator, source);
@@ -630,7 +727,7 @@ test "findAtomIdx prefers exact altloc and falls back to blank" {
     try testing.expectEqual(findAtomIdx(mdl.atoms.items, res0, 0, "N", 'B', orig).?, 0);
 }
 
-test "generateMovers creates methyl rotator for ALA" {
+test "generateMovers creates no mover for ALA methyl H" {
     const source = @embedFile("../test_data/tiny.cif");
     var mdl = try mmcif.parseModel(testing.allocator, source);
     defer mdl.deinit();
@@ -645,15 +742,24 @@ test "generateMovers creates methyl rotator for ALA" {
         testing.allocator.free(movers);
     }
 
-    // ALA has 1 methyl group on CB -> should produce 1 methyl_rotator
-    var methyl_count: u32 = 0;
-    for (movers) |m| {
-        if (m.kind == .methyl_rotator) methyl_count += 1;
-    }
-    try testing.expectEqual(@as(u32, 1), methyl_count);
+    // The CB methyl stays staggered as placed: no mover controls its H.
+    try expectNoMethylMover(&mdl, movers);
 }
 
-test "generateMovers creates separate methyl rotators per altloc conformer" {
+fn expectNoMethylMover(mdl: *const Model, movers: []const Mover) !void {
+    var n_methyl_h: u32 = 0;
+    for (mdl.atoms.items) |a| {
+        if (a.is_added and a.mover_hint == .rotate_methyl) n_methyl_h += 1;
+    }
+    try testing.expect(n_methyl_h > 0);
+    for (movers) |m| {
+        for (m.atom_indices) |ai| {
+            try testing.expect(mdl.atoms.items[ai].mover_hint != .rotate_methyl);
+        }
+    }
+}
+
+test "generateMovers creates no methyl mover for any altloc conformer" {
     const source = @embedFile("../test_data/ala_altloc.cif");
     var mdl = try mmcif.parseModel(testing.allocator, source);
     defer mdl.deinit();
@@ -668,20 +774,7 @@ test "generateMovers creates separate methyl rotators per altloc conformer" {
         testing.allocator.free(movers);
     }
 
-    var methyl_count: u32 = 0;
-    var center_a: u32 = 0;
-    var center_b: u32 = 0;
-    for (movers) |m| {
-        if (m.kind != .methyl_rotator) continue;
-        methyl_count += 1;
-        const center_idx = m.center_idx.?;
-        if (mdl.atoms.items[center_idx].altloc == 'A') center_a += 1;
-        if (mdl.atoms.items[center_idx].altloc == 'B') center_b += 1;
-    }
-
-    try testing.expectEqual(@as(u32, 2), methyl_count);
-    try testing.expectEqual(@as(u32, 1), center_a);
-    try testing.expectEqual(@as(u32, 1), center_b);
+    try expectNoMethylMover(&mdl, movers);
 }
 
 test "generateMovers total count for ALA" {
@@ -699,16 +792,10 @@ test "generateMovers total count for ALA" {
         testing.allocator.free(movers);
     }
 
-    // ALA N-terminal should have: 1 methyl rotator (CB) + 1 NH3+ rotator (N-terminal H1/H2/H3)
-    // No single-H rotators (ALA has no OH/SH groups)
-    var methyl_count: u32 = 0;
-    var nh3_count: u32 = 0;
-    for (movers) |m| {
-        if (m.kind == .methyl_rotator) methyl_count += 1;
-        if (m.kind == .nh3_rotator) nh3_count += 1;
-    }
-    try testing.expectEqual(@as(u32, 1), methyl_count);
-    try testing.expectEqual(@as(u32, 1), nh3_count);
+    // N-terminal ALA has only the NH3+ rotator (H1/H2/H3): its CB methyl gets
+    // no mover and it has no OH/SH groups.
+    try testing.expectEqual(@as(usize, 1), movers.len);
+    try testing.expectEqual(mover_mod.MoverKind.nh3_rotator, movers[0].kind);
 }
 
 test "optimizer pipeline runs without error on ALA" {
@@ -735,7 +822,7 @@ test "optimizer pipeline runs without error on ALA" {
     _ = try opt_mod.optimize(testing.allocator, movers, &mdl, opt_config);
 }
 
-test "methyl rotator controls 3 atoms" {
+test "NH3 rotator controls 3 atoms" {
     const source = @embedFile("../test_data/tiny.cif");
     var mdl = try mmcif.parseModel(testing.allocator, source);
     defer mdl.deinit();
@@ -751,9 +838,9 @@ test "methyl rotator controls 3 atoms" {
     }
 
     for (movers) |m| {
-        if (m.kind == .methyl_rotator) {
+        if (m.kind == .nh3_rotator) {
             try testing.expectEqual(@as(usize, 3), m.atom_indices.len);
-            try testing.expectEqual(@as(usize, 3), m.orientations.len);
+            try testing.expectEqual(@as(usize, 4), m.orientations.len);
         }
     }
 }
@@ -850,6 +937,108 @@ test "generateMovers skips fixed His override" {
     for (movers) |m| {
         try testing.expect(m.kind != .his_flip);
     }
+}
+
+test "generateMovers keeps the ring flip for a pKa-derived HIP" {
+    const source = @embedFile("../test_data/his.cif");
+    var overrides = try protonation.parseString(testing.allocator,
+        \\A:1 HIS HIP
+    );
+    defer overrides.deinit();
+
+    // A user's HIP pins the ring; the same state from a pKa prediction
+    // fixes only the charge.
+    for ([_]protonation.Source{ .user, .pka }) |src| {
+        overrides.entries[0].source = src;
+        var m = try mmcif.parseModel(testing.allocator, source);
+        defer m.deinit();
+        m.residues.items[0].auth_seq_id = 1;
+        placer.applyChemistryWithConfig(&m, .{ .protonation = &overrides });
+        _ = try placer.addHydrogensWithConfig(&m, null, null, .{ .protonation = &overrides });
+        const gen_result = try generateMovers(testing.allocator, &m, false, null, null, &overrides, .neutron);
+        const movers = gen_result.movers;
+        defer {
+            for (0..movers.len) |i| @constCast(&movers[i]).deinit();
+            testing.allocator.free(movers);
+        }
+        var his: ?*const Mover = null;
+        for (movers) |*mv| {
+            if (mv.kind == .his_flip) his = mv;
+        }
+        if (src == .user) {
+            try testing.expect(his == null);
+        } else {
+            try testing.expectEqual(@as(usize, 2), his.?.orientations.len);
+        }
+    }
+}
+
+test "protonated ASP leaves the proton's oxygen to a carboxyl flip mover" {
+    const source =
+        \\data_ASP
+        \\#
+        \\loop_
+        \\_atom_site.group_PDB
+        \\_atom_site.id
+        \\_atom_site.type_symbol
+        \\_atom_site.label_atom_id
+        \\_atom_site.label_comp_id
+        \\_atom_site.label_asym_id
+        \\_atom_site.label_seq_id
+        \\_atom_site.Cartn_x
+        \\_atom_site.Cartn_y
+        \\_atom_site.Cartn_z
+        \\_atom_site.occupancy
+        \\_atom_site.B_iso_or_equiv
+        \\_atom_site.label_alt_id
+        \\_atom_site.auth_asym_id
+        \\_atom_site.auth_seq_id
+        \\ATOM 1 N N ASP A 1 0.0 0.0 0.0 1.00 10.0 . A 1
+        \\ATOM 2 C CA ASP A 1 1.5 0.0 0.0 1.00 10.0 . A 1
+        \\ATOM 3 C C ASP A 1 2.1 1.4 0.0 1.00 10.0 . A 1
+        \\ATOM 4 O O ASP A 1 3.3 1.6 0.0 1.00 10.0 . A 1
+        \\ATOM 5 C CB ASP A 1 2.0 -0.8 1.2 1.00 10.0 . A 1
+        \\ATOM 6 C CG ASP A 1 3.4 -0.4 1.4 1.00 10.0 . A 1
+        \\ATOM 7 O OD1 ASP A 1 4.2 0.3 0.7 1.00 10.0 . A 1
+        \\ATOM 8 O OD2 ASP A 1 3.8 -0.8 2.6 1.00 10.0 . A 1
+        \\#
+    ;
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+    var overrides = try protonation.parseString(testing.allocator,
+        \\A:1 ASP PROTONATED
+    );
+    defer overrides.deinit();
+    placer.applyChemistryWithConfig(&mdl, .{ .protonation = &overrides });
+    _ = try placer.addHydrogensWithConfig(&mdl, null, null, .{ .protonation = &overrides });
+
+    // Placement: HD1 on OD1, HD2 parked at the absent sentinel, so the
+    // result is a single proton even without optimization.
+    var hd1: ?u32 = null;
+    var hd2: ?u32 = null;
+    for (mdl.atoms.items, 0..) |atom, i| {
+        if (!atom.is_added) continue;
+        if (std.mem.eql(u8, atom.nameSlice(), "HD1")) hd1 = @intCast(i);
+        if (std.mem.eql(u8, atom.nameSlice(), "HD2")) hd2 = @intCast(i);
+    }
+    try testing.expect(!mover_mod.isAbsentH(mdl.atoms.items[hd1.?]));
+    try testing.expect(mover_mod.isAbsentH(mdl.atoms.items[hd2.?]));
+
+    const gen_result = try generateMovers(testing.allocator, &mdl, false, null, null, &overrides, .neutron);
+    const movers = gen_result.movers;
+    defer {
+        for (0..movers.len) |i| @constCast(&movers[i]).deinit();
+        testing.allocator.free(movers);
+    }
+    var n_carboxyl: usize = 0;
+    for (movers) |m| {
+        if (m.kind != .carboxyl_flip) continue;
+        n_carboxyl += 1;
+        try testing.expectEqual(@as(usize, 2), m.orientations.len);
+        try testing.expectEqual(hd1.?, m.atom_indices[2]);
+        try testing.expectEqual(hd2.?, m.atom_indices[3]);
+    }
+    try testing.expectEqual(@as(usize, 1), n_carboxyl);
 }
 
 // ── NH2 group rotator (issue #253) ───────────────────────────────────────────

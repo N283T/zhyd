@@ -12,16 +12,16 @@
 
 const std = @import("std");
 const testing = std.testing;
-const zreduce = @import("root.zig");
-const mmcif = zreduce.mmcif;
-const place = zreduce.place;
-const optimize = zreduce.optimize;
-const cif = zreduce.cif;
+const zhyd = @import("root.zig");
+const mmcif = zhyd.mmcif;
+const place = zhyd.place;
+const optimize = zhyd.optimize;
+const cif = zhyd.cif;
 
 /// Helper: run the full pipeline on a .cif.gz file, return model and placement stats.
 /// Caller owns model and must deinit.
 const PipelineResult = struct {
-    model: zreduce.model.Model,
+    model: zhyd.model.Model,
     n_placed: u32,
     n_residues: u32,
     n_skipped_existing: u32,
@@ -39,7 +39,7 @@ const PipelineResult = struct {
 /// will have those residues skipped, which is acceptable for these tests.
 fn runPipeline(allocator: std.mem.Allocator, path: []const u8) !PipelineResult {
     // 1. Read and decompress
-    const source = try zreduce.run.readFile(allocator, path);
+    const source = try zhyd.run.readFile(allocator, path);
     defer allocator.free(source);
 
     // 2. Parse CIF document
@@ -92,7 +92,7 @@ fn runPipeline(allocator: std.mem.Allocator, path: []const u8) !PipelineResult {
     }
 
     // 9. Validate (should not crash on any real structure)
-    var validation = try zreduce.validate.validateModel(allocator, &mdl);
+    var validation = try zhyd.validate.validateModel(allocator, &mdl);
     validation.deinit();
 
     return .{
@@ -107,7 +107,7 @@ fn runPipeline(allocator: std.mem.Allocator, path: []const u8) !PipelineResult {
 }
 
 /// Count added hydrogen atoms in the final model.
-fn countFinalH(mdl: *const zreduce.model.Model) u32 {
+fn countFinalH(mdl: *const zhyd.model.Model) u32 {
     var count: u32 = 0;
     for (mdl.atoms.items) |atom| {
         if (atom.is_added and atom.is_hydrogen) count += 1;
@@ -116,7 +116,7 @@ fn countFinalH(mdl: *const zreduce.model.Model) u32 {
 }
 
 /// Count residues with is_chain_break_before = true.
-fn countChainBreaks(mdl: *const zreduce.model.Model) u32 {
+fn countChainBreaks(mdl: *const zhyd.model.Model) u32 {
     var count: u32 = 0;
     for (mdl.residues.items) |res| {
         if (res.is_chain_break_before) count += 1;
@@ -125,10 +125,10 @@ fn countChainBreaks(mdl: *const zreduce.model.Model) u32 {
 }
 
 /// Check that the output is valid mmCIF (write and re-parse).
-fn verifyOutputRoundTrip(allocator: std.mem.Allocator, mdl: *const zreduce.model.Model) !void {
+fn verifyOutputRoundTrip(allocator: std.mem.Allocator, mdl: *const zhyd.model.Model) !void {
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
-    try zreduce.writer.mmcif_writer.write(&buf.writer, mdl, "TEST");
+    try zhyd.writer.mmcif_writer.write(&buf.writer, mdl, "TEST");
 
     // Re-parse to verify valid CIF
     var doc2 = try cif.readString(allocator, buf.writer.buffered());
@@ -140,7 +140,7 @@ fn verifyOutputRoundTrip(allocator: std.mem.Allocator, mdl: *const zreduce.model
 
 /// Verify added H bond lengths. Allows up to 1% outliers for real structures
 /// (strained geometry, low-occupancy altlocs, etc.).
-fn verifyBondLengths(mdl: *const zreduce.model.Model) !void {
+fn verifyBondLengths(mdl: *const zhyd.model.Model) !void {
     var n_checked: u32 = 0;
     var n_bad: u32 = 0;
 
@@ -296,4 +296,149 @@ test "real-file: 2hnt — gaps + insertion codes, gamma-thrombin" {
 
     try verifyBondLengths(&result.model);
     try verifyOutputRoundTrip(testing.allocator, &result.model);
+}
+
+// ============================================================
+// Experimental pKa model on real structures
+// ============================================================
+
+fn loadForPka(allocator: std.mem.Allocator, path: []const u8) !zhyd.model.Model {
+    const source = try zhyd.run.readFile(allocator, path);
+    defer allocator.free(source);
+    var mdl = try mmcif.parseModel(allocator, source);
+    errdefer mdl.deinit();
+    place.applyChemistry(&mdl);
+    return mdl;
+}
+
+test "real-file pka: 2cf8 disulfide cysteines excluded, values bounded, deterministic" {
+    var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
+    defer mdl.deinit();
+    var first = try zhyd.pka.predict(testing.allocator, &mdl, .{});
+    defer first.deinit();
+    var second = try zhyd.pka.predict(testing.allocator, &mdl, .{});
+    defer second.deinit();
+
+    // Thrombin heavy+light chains: every cysteine is in a disulfide.
+    var n_disulfide: usize = 0;
+    for (first.excluded) |site| {
+        if (site.reason == .disulfide) n_disulfide += 1;
+    }
+    try testing.expect(n_disulfide >= 8);
+    for (first.sites) |site| try testing.expect(site.kind != .cys);
+
+    try testing.expect(first.sites.len > 50);
+    try testing.expectEqual(first.sites.len, second.sites.len);
+    for (first.sites, second.sites) |a, b| {
+        try testing.expect(a.predicted_pka >= -2.0 and a.predicted_pka <= 16.0);
+        try testing.expectEqual(a.predicted_pka, b.predicted_pka);
+    }
+}
+
+test "real-file pka: crystal waters do not change structure terms" {
+    var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
+    defer mdl.deinit();
+    var with_water = try zhyd.pka.predict(testing.allocator, &mdl, .{ .include_coupling = false });
+    defer with_water.deinit();
+
+    // Move every water far away; burial and H-bond terms must be identical.
+    var n_water: usize = 0;
+    for (mdl.atoms.items) |*atom| {
+        const comp = mdl.residues.items[atom.residue_idx].compIdSlice();
+        if (!std.mem.eql(u8, comp, "HOH")) continue;
+        atom.pos = .{ .x = 1.0e4, .y = 1.0e4, .z = 1.0e4 };
+        n_water += 1;
+    }
+    try testing.expect(n_water > 0);
+    var without_water = try zhyd.pka.predict(testing.allocator, &mdl, .{ .include_coupling = false });
+    defer without_water.deinit();
+
+    for (with_water.sites, without_water.sites) |a, b| {
+        try testing.expectEqual(a.terms.burial, b.terms.burial);
+        try testing.expectEqual(a.terms.hydrogen_bond, b.terms.hydrogen_bond);
+        try testing.expectEqual(a.burial_fraction, b.burial_fraction);
+    }
+}
+
+test "real-file pka: 2cf8 PROPKA engine matches PROPKA 3.5.1" {
+    if (!zhyd.pka_propka.available) return error.SkipZigTest;
+    var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
+    defer mdl.deinit();
+    var result = try zhyd.pka_propka.predict(testing.allocator, &mdl, .{});
+    defer result.deinit();
+
+    // Reference: propka3 3.5.1 on the same model (hydrogens and waters
+    // removed, PDB written by gemmi). Chain H starts at Ile16, so its N+
+    // group also checks TER handling between chains.
+    const Expected = struct { chain: []const u8, num: i32, kind: zhyd.pka.SiteKind, pka: f32 };
+    const expected = [_]Expected{
+        .{ .chain = "H", .num = 194, .kind = .asp, .pka = 4.41 },
+        .{ .chain = "H", .num = 192, .kind = .glu, .pka = 4.71 },
+        .{ .chain = "H", .num = 57, .kind = .his, .pka = 4.86 },
+        .{ .chain = "H", .num = 16, .kind = .n_term, .pka = 7.67 },
+        .{ .chain = "I", .num = 2, .kind = .n_term, .pka = 7.49 },
+    };
+    for (expected) |e| {
+        var found = false;
+        for (result.sites) |site| {
+            const res = mdl.residues.items[site.residue_idx];
+            const chain = mdl.chains.items[res.chain_idx];
+            if (site.kind != e.kind or res.auth_seq_id != e.num) continue;
+            if (!std.mem.eql(u8, chain.authSlice(), e.chain)) continue;
+            try testing.expectApproxEqAbs(e.pka, site.predicted_pka, 0.006);
+            found = true;
+        }
+        try testing.expect(found);
+    }
+    // PROPKA marks all eight cysteines 99.99; zhyd reports them as excluded.
+    var n_disulfide: usize = 0;
+    for (result.excluded) |site| {
+        if (site.reason == .disulfide) n_disulfide += 1;
+    }
+    try testing.expectEqual(@as(usize, 8), n_disulfide);
+    for (result.sites) |site| try testing.expect(site.kind != .cys);
+}
+
+// ============================================================
+// pH-driven protonation states (run --ph)
+// ============================================================
+
+/// Run `processFile` on 1L2Y model 1 at `ph` and return the state report.
+fn runAtPh(allocator: std.mem.Allocator, tmp: *std.testing.TmpDir, ph: f32) ![]u8 {
+    const io = std.testing.io;
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(dir);
+    const out_cif = try std.fmt.allocPrint(allocator, "{s}/out.cif", .{dir});
+    defer allocator.free(out_cif);
+    const state_json = try std.fmt.allocPrint(allocator, "{s}/state.json", .{dir});
+    defer allocator.free(state_json);
+    _ = try zhyd.run.processFile(allocator, .{
+        .input_path = "examples/data/1L2Y.cif.gz",
+        .output_path = out_cif,
+        .state_json_path = state_json,
+        .format = .mmcif,
+        .model_filter = .first,
+        .strip_h = true,
+        .quiet = true,
+        .ph = ph,
+    });
+    return tmp.dir.readFileAlloc(io, "state.json", allocator, .limited(1 << 20));
+}
+
+test "real-file ph: 1L2Y states follow the pH and record their source" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Trp-cage: Lys8 and Asp9. At pH 0 Asp9 is protonated (oxygen chosen by
+    // the optimizer); at pH 14 Lys8 is neutral. Both come from the pKa.
+    const acid = try runAtPh(testing.allocator, &tmp, 0.0);
+    defer testing.allocator.free(acid);
+    try testing.expect(std.mem.find(u8, acid, "\"site\": \"ASP\"}, \"state\": {\"macrostate\": \"protonated_neutral\"") != null);
+    try testing.expect(std.mem.find(u8, acid, "\"source\": \"pka_predicted\"") != null);
+    try testing.expect(std.mem.find(u8, acid, "\"site\": \"LYS\"}, \"state\": {\"macrostate\": \"protonated_cation\"") != null);
+
+    const base = try runAtPh(testing.allocator, &tmp, 14.0);
+    defer testing.allocator.free(base);
+    try testing.expect(std.mem.find(u8, base, "\"site\": \"LYS\"}, \"state\": {\"macrostate\": \"neutral\"") != null);
+    try testing.expect(std.mem.find(u8, base, "\"site\": \"ASP\"}, \"state\": {\"macrostate\": \"deprotonated_anion\"") != null);
 }

@@ -12,9 +12,9 @@ HH21/HH22, NH2 HD21/HD22, HE21/HE22) are matched by minimum distance rather
 than by name, since naming conventions differ between tools.
 
 Usage:
-    ./scripts/compare_h_v2.py zreduce.cif chimerax.cif
-    ./scripts/compare_h_v2.py zreduce.cif chimerax.cif --verbose
-    ./scripts/compare_h_v2.py zreduce.cif chimerax.cif --summary-only
+    ./scripts/compare_h_v2.py zhyd.cif chimerax.cif
+    ./scripts/compare_h_v2.py zhyd.cif chimerax.cif --verbose
+    ./scripts/compare_h_v2.py zhyd.cif chimerax.cif --summary-only
 """
 
 import argparse
@@ -75,7 +75,7 @@ def _normalize_h_name(name: str) -> str:
     """Normalize H atom name to mmCIF convention.
 
     PDB legacy uses * for prime (e.g. H1*, H2*1), mmCIF uses ' (e.g. H1', H2'1).
-    reduce2 (cctbx) outputs * style; zreduce/ChimeraX output ' style.
+    reduce2 (cctbx) outputs * style; zhyd/ChimeraX output ' style.
     Also handles the digit-after-star pattern: H2*1 -> H2', H2*2 -> H2''.
     """
     if "*" not in name:
@@ -138,7 +138,7 @@ def extract_h(path: str) -> tuple[dict[tuple, list[AtomPos]], dict[str, int]]:
 
     Uses auth_asym_id + auth_seq_id as the residue key for cross-tool
     compatibility: label_seq_id for non-polymer residues varies between
-    tools (e.g. zreduce="1" vs ChimeraX="."), and label_asym_id may
+    tools (e.g. zhyd="1" vs ChimeraX="."), and label_asym_id may
     differ for glycan chains.
     """
     doc = gemmi.cif.read(path)
@@ -377,7 +377,7 @@ def print_report(
 
 def main():
     parser = argparse.ArgumentParser(description="Compare H placement (equiv-aware)")
-    parser.add_argument("file_a", help="First mmCIF (e.g. zreduce)")
+    parser.add_argument("file_a", help="First mmCIF (e.g. zhyd)")
     parser.add_argument("file_b", help="Second mmCIF (e.g. ChimeraX)")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--summary-only", "-s", action="store_true")

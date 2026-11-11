@@ -12,6 +12,7 @@ const Orientation = mover_mod.Orientation;
 const element = @import("../element.zig");
 const AtomFlags = element.AtomFlags;
 const bond_policy = @import("../place/bond_policy.zig");
+const geometry = @import("../place/geometry.zig");
 
 /// Compute planar NH2 hydrogen positions given:
 ///   n_pos: the nitrogen position
@@ -125,7 +126,8 @@ fn computeRingNH(n_pos: Vec3(f32), bonded1: Vec3(f32), bonded2: Vec3(f32), mode:
 }
 
 /// Create a His flip mover.
-/// 6 orientations (2 flip states × 3 protonation states).
+/// Neutral His: 4 orientations (2 flip states × HID/HIE). `charged` (HIP,
+/// from a pKa-derived state): 2 orientations (2 flip states, both H).
 ///
 /// Atom order in atom_indices / positions: [ND1, CD2, CE1, NE2, HD1, HE2]
 /// hd1_idx / he2_idx may be null if not yet present in the model;
@@ -142,8 +144,9 @@ pub fn createHisFlipper(
     he2_idx: ?u32,
     residue_idx: u32,
     mode: bond_policy.BondLengthMode,
+    charged: bool,
 ) !Mover {
-    const n_orientations = 4;
+    const n_orientations: usize = if (charged) 2 else 4;
     const n_atoms_per = 6;
 
     // --- Original ring positions ---
@@ -184,7 +187,7 @@ pub fn createHisFlipper(
     // Orient 1: no flip, HID (ND1-HD1 protonated, NE2 acceptor)
     // Orient 2: flip, HIE
     // Orient 3: flip, HID
-    const penalties = [4]f32{ 0.00, 0.00, 0.50, 0.50 };
+    const neutral_penalties = [4]f32{ 0.00, 0.00, 0.50, 0.50 };
 
     // For each orientation: positions = [ND1, CD2, CE1, NE2, HD1, HE2]
     const OrientSpec = struct {
@@ -200,7 +203,7 @@ pub fn createHisFlipper(
     const hd1_no_flip = if (hd1_idx != null) hd1_orig else hd1_computed;
     const he2_no_flip = if (he2_idx != null) he2_orig else he2_computed;
 
-    const specs = [4]OrientSpec{
+    const neutral_specs = [4]OrientSpec{
         // 0: no flip, HIE (HE2 only)
         .{ .nd1_p = nd1, .cd2_p = cd2, .ce1_p = ce1, .ne2_p = ne2, .hd1_p = ABSENT_H_POS, .he2_p = he2_no_flip },
         // 1: no flip, HID (HD1 only)
@@ -222,7 +225,7 @@ pub fn createHisFlipper(
     const h_absent = AtomFlags{}; // absent H (no flags)
 
     // [ND1, CD2, CE1, NE2, HD1, HE2]
-    const orient_flags = [4][6]AtomFlags{
+    const neutral_flags = [4][6]AtomFlags{
         // 0: HIE (HE2 only) → ND1=acceptor, NE2=donor
         .{ ar_acc_n, ar_acc, ar_acc, ar_don, h_absent, h_don },
         // 1: HID (HD1 only) → ND1=donor, NE2=acceptor
@@ -232,6 +235,21 @@ pub fn createHisFlipper(
         // 3: flip, HID → ND1=donor, NE2=acceptor
         .{ ar_don, ar_acc, ar_acc, ar_acc_n, h_don, h_absent },
     };
+
+    // HIP: both ring N protonated and positive, both H present.
+    const ar_pos = AtomFlags{ .aromatic = true, .donor = true, .positive = true };
+    const charged_specs = [2]OrientSpec{
+        .{ .nd1_p = nd1, .cd2_p = cd2, .ce1_p = ce1, .ne2_p = ne2, .hd1_p = hd1_no_flip, .he2_p = he2_no_flip },
+        .{ .nd1_p = nd1_f, .cd2_p = cd2_f, .ce1_p = ce1_f, .ne2_p = ne2_f, .hd1_p = hd1_f_computed, .he2_p = he2_f_computed },
+    };
+    const charged_flags = [2][6]AtomFlags{
+        .{ ar_pos, ar_acc, ar_acc, ar_pos, h_don, h_don },
+        .{ ar_pos, ar_acc, ar_acc, ar_pos, h_don, h_don },
+    };
+    const charged_penalties = [2]f32{ 0.00, 0.50 };
+    const specs: []const OrientSpec = if (charged) &charged_specs else &neutral_specs;
+    const orient_flags: []const [6]AtomFlags = if (charged) &charged_flags else &neutral_flags;
+    const penalties: []const f32 = if (charged) &charged_penalties else &neutral_penalties;
 
     // Allocate one contiguous block for all orientation positions.
     const all_positions = try allocator.alloc(Vec3(f32), n_orientations * n_atoms_per);
@@ -276,6 +294,78 @@ pub fn createHisFlipper(
 
     return Mover{
         .kind = .his_flip,
+        .residue_idx = residue_idx,
+        .atom_indices = atom_indices,
+        .orientations = orientations,
+        .allocator = allocator,
+        .positions_backing = all_positions,
+    };
+}
+
+/// Create a carboxyl flip mover for a protonated Asp/Glu whose proton's
+/// oxygen is left open. 2 orientations: the H syn on the first oxygen, or
+/// syn on the second; the unused H sits at the absent sentinel. Anti
+/// carboxylic acid conformers are not modelled.
+///
+/// Atom order in atom_indices / positions: [O1, O2, H1, H2]
+pub fn createCarboxylFlipper(
+    allocator: std.mem.Allocator,
+    atoms: []const Atom,
+    o1_idx: u32,
+    o2_idx: u32,
+    c_idx: u32,
+    h1_idx: u32,
+    h2_idx: u32,
+    residue_idx: u32,
+    mode: bond_policy.BondLengthMode,
+) !Mover {
+    const n_orientations = 2;
+    const n_atoms_per = 4;
+    const o1 = atoms[o1_idx].pos;
+    const o2 = atoms[o2_idx].pos;
+    const c = atoms[c_idx].pos;
+    const bond_len = bond_policy.adjustedBondLength(mode, 0.97, .O, .Hpol);
+    const h1 = geometry.placeHXR2Planar(o1.cast(f64), c.cast(f64), o2.cast(f64), bond_len, 0.0).cast(f32);
+    const h2 = geometry.placeHXR2Planar(o2.cast(f64), c.cast(f64), o1.cast(f64), bond_len, 0.0).cast(f32);
+
+    const o_don = AtomFlags{ .donor = true };
+    const o_acc = AtomFlags{ .acceptor = true };
+    const h_don = AtomFlags{ .donor = true };
+    const h_absent = AtomFlags{};
+    const specs = [n_orientations][n_atoms_per]Vec3(f32){
+        .{ o1, o2, h1, ABSENT_H_POS },
+        .{ o1, o2, ABSENT_H_POS, h2 },
+    };
+    const orient_flags = [n_orientations][n_atoms_per]AtomFlags{
+        .{ o_don, o_acc, h_don, h_absent },
+        .{ o_acc, o_don, h_absent, h_don },
+    };
+
+    const all_positions = try allocator.alloc(Vec3(f32), n_orientations * n_atoms_per);
+    errdefer allocator.free(all_positions);
+    const orientations = try allocator.alloc(Orientation, n_orientations);
+    var allocated: usize = 0;
+    errdefer {
+        for (orientations[0..allocated]) |o| {
+            if (o.flags) |f| allocator.free(f);
+        }
+        allocator.free(orientations);
+    }
+    for (specs, orient_flags, 0..) |spec, flag_row, i| {
+        const positions = all_positions[i * n_atoms_per .. (i + 1) * n_atoms_per];
+        @memcpy(positions, &spec);
+        const flags = try allocator.alloc(AtomFlags, n_atoms_per);
+        @memcpy(flags, &flag_row);
+        orientations[i] = .{ .positions = positions, .flags = flags };
+        allocated += 1;
+    }
+
+    const atom_indices = try allocator.alloc(u32, n_atoms_per);
+    errdefer allocator.free(atom_indices);
+    @memcpy(atom_indices, &[n_atoms_per]u32{ o1_idx, o2_idx, h1_idx, h2_idx });
+
+    return Mover{
+        .kind = .carboxyl_flip,
         .residue_idx = residue_idx,
         .atom_indices = atom_indices,
         .orientations = orientations,
@@ -351,7 +441,7 @@ test "his flipper has 4 orientations" {
         .{ .pos = .{ .x = -0.9, .y = -2.0, .z = 0.0 } }, // 5: HE2
     };
 
-    var mover = try createHisFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 5, 3, .neutron);
+    var mover = try createHisFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 5, 3, .neutron, false);
     defer mover.deinit();
 
     try testing.expectEqual(@as(usize, 4), mover.orientations.len);
@@ -369,7 +459,7 @@ test "his flipper penalties match spec" {
         .{ .pos = .{ .x = -0.9, .y = -2.0, .z = 0.0 } }, // 5: HE2
     };
 
-    var mover = try createHisFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 5, 3, .neutron);
+    var mover = try createHisFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 5, 3, .neutron, false);
     defer mover.deinit();
 
     const expected_penalties = [4]f32{ 0.00, 0.00, 0.50, 0.50 };
@@ -390,7 +480,7 @@ test "his flipper orientations have chemistry flags" {
         .{ .pos = .{ .x = -0.9, .y = -2.0, .z = 0.0 } }, // 5: HE2
     };
 
-    var mover = try createHisFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 5, 3, .neutron);
+    var mover = try createHisFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 5, 3, .neutron, false);
     defer mover.deinit();
 
     // All 4 orientations should have flags
@@ -420,4 +510,53 @@ test "his flipper orientations have chemistry flags" {
         // Exactly one H should be absent (HID xor HIE, never HIP)
         try testing.expect(hd1_absent != he2_absent);
     }
+}
+
+test "carboxyl flipper puts the proton on one oxygen at a time" {
+    const allocator = testing.allocator;
+    const atoms = [_]Atom{
+        .{ .pos = .{ .x = 1.2, .y = 0.7, .z = 0.0 } }, // 0: OD1
+        .{ .pos = .{ .x = -1.2, .y = 0.7, .z = 0.0 } }, // 1: OD2
+        .{ .pos = .{ .x = 0.0, .y = 0.0, .z = 0.0 } }, // 2: CG
+        .{ .pos = .{ .x = 1.5, .y = 1.5, .z = 0.0 } }, // 3: HD1
+        .{ .pos = Mover.ABSENT_H_POS }, // 4: HD2
+    };
+    var mover = try createCarboxylFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 7, .neutron);
+    defer mover.deinit();
+    try testing.expectEqual(mover_mod.MoverKind.carboxyl_flip, mover.kind);
+    try testing.expectEqual(@as(u16, 2), mover.nOrientations());
+    for (mover.orientations, 0..) |o, i| {
+        const h1_absent = mover_mod.isAbsentPos(o.positions[2]);
+        const h2_absent = mover_mod.isAbsentPos(o.positions[3]);
+        try testing.expect(h1_absent != h2_absent);
+        try testing.expectEqual(i == 1, h1_absent);
+        // The protonated oxygen is the donor.
+        try testing.expectEqual(!h1_absent, o.flags.?[0].donor);
+        try testing.expectEqual(!h2_absent, o.flags.?[1].donor);
+        // O-H bond length.
+        const h = if (h1_absent) o.positions[3] else o.positions[2];
+        const parent = if (h1_absent) o.positions[1] else o.positions[0];
+        try testing.expectApproxEqAbs(@as(f32, 0.97), h.sub(parent).length(), 0.05);
+    }
+}
+
+test "charged His flipper keeps both ring H in both flip states" {
+    const allocator = testing.allocator;
+    const atoms = [_]Atom{
+        .{ .pos = .{ .x = 1.0, .y = 0.0, .z = 0.0 } }, // 0: ND1
+        .{ .pos = .{ .x = -0.5, .y = 1.2, .z = 0.0 } }, // 1: CD2
+        .{ .pos = .{ .x = 0.8, .y = 1.3, .z = 0.0 } }, // 2: CE1
+        .{ .pos = .{ .x = 0.0, .y = 2.0, .z = 0.0 } }, // 3: NE2
+        .{ .pos = .{ .x = 2.0, .y = -0.3, .z = 0.0 } }, // 4: HD1
+        .{ .pos = .{ .x = -0.3, .y = 3.0, .z = 0.0 } }, // 5: HE2
+    };
+    var mover = try createHisFlipper(allocator, &atoms, 0, 1, 2, 3, 4, 5, 3, .neutron, true);
+    defer mover.deinit();
+    try testing.expectEqual(@as(u16, 2), mover.nOrientations());
+    for (mover.orientations) |o| {
+        try testing.expect(!mover_mod.isAbsentPos(o.positions[4]));
+        try testing.expect(!mover_mod.isAbsentPos(o.positions[5]));
+        try testing.expect(o.flags.?[0].positive and o.flags.?[3].positive);
+    }
+    try testing.expect(mover.orientations[1].penalty > mover.orientations[0].penalty);
 }

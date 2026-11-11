@@ -1,0 +1,88 @@
+{
+  "parameters": {
+    "version": "zhyd-pka-protein-v0.2",
+    "burial_max_shift": 0.0,
+    "hbond_strength": 0.5,
+    "hbond_max_shift": 0.75
+  },
+  "fit": {
+    "objective": "train_split_mae",
+    "seed": "zhyd-pka-split-v1",
+    "train_fraction": 0.8,
+    "train_rows": 668,
+    "train_objective": 0.6946
+  },
+  "data": {
+    "source": "PKAD-R standalone file PKAD-R-250211.json (https://compbio.clemson.edu/pkad-r/)",
+    "citation": "Chen et al., J. Comput. Biophys. Chem. (2025), doi:10.1142/S2737416525500164",
+    "sha256": "9ee3cfb885306ca944e177c9b21fa700dd19b8cc985e4bdb08f42513ae269937",
+    "downloaded": "2026-11-05",
+    "structures": "RCSB mmCIF fetched 2026-11-05 by scripts/pka/pkadr.py fetch (model 1)",
+    "normalization": "scripts/pka/pkadr.py normalize: numeric pKa only, PDB-mapped, SNase as stress holdout",
+    "cluster_definition": "union of PDB id, PKAD-R 'Sequence_Identity_>_30%' and 'Alternative_PDBs' links, and identical protein name"
+  },
+  "held_out_results": {
+    "selection_rule": "train-split MAE minimum, fixed before inspecting test or stress rows",
+    "v0.2": {
+      "stress:snase": {
+        "mae": 1.947,
+        "n": 102,
+        "rmse": 2.613,
+        "shift_direction_accuracy": 0.516
+      },
+      "test": {
+        "mae": 0.802,
+        "n": 133,
+        "rmse": 1.352,
+        "shift_direction_accuracy": 0.708
+      },
+      "train": {
+        "mae": 0.695,
+        "n": 633,
+        "rmse": 1.05,
+        "shift_direction_accuracy": 0.665
+      }
+    },
+    "v0.1_priors": {
+      "stress:snase": {
+        "mae": 1.334,
+        "n": 102,
+        "rmse": 1.628,
+        "shift_direction_accuracy": 0.763
+      },
+      "test": {
+        "mae": 0.915,
+        "n": 133,
+        "rmse": 1.341,
+        "shift_direction_accuracy": 0.469
+      },
+      "train": {
+        "mae": 0.867,
+        "n": 633,
+        "rmse": 1.282,
+        "shift_direction_accuracy": 0.54
+      }
+    },
+    "null_model_pka_only": {
+      "stress:snase": {
+        "mae": 1.957,
+        "n": 102,
+        "rmse": 2.49,
+        "shift_direction_accuracy": 0.656
+      },
+      "test": {
+        "mae": 0.848,
+        "n": 133,
+        "rmse": 1.354,
+        "shift_direction_accuracy": 0.726
+      },
+      "train": {
+        "mae": 0.762,
+        "n": 633,
+        "rmse": 1.094,
+        "shift_direction_accuracy": 0.594
+      }
+    },
+    "caveat": "Not fully blind: test and SNase metrics of an earlier fit were inspected during development, and the solvent-exclusion fix (waters ignored by burial/H-bond terms) was found while diagnosing them. Parameters themselves were selected on train rows only. Treat these numbers as development estimates; a fresh holdout is needed for acceptance."
+  }
+}

@@ -11,11 +11,10 @@ const element = @import("../element.zig");
 pub const MoverKind = enum(u4) {
     single_h_rotator, // OH, SH, SeH — 12 orientations at 30° intervals
     nh3_rotator, // NH3+ — 3 orientations (120° spacing)
-    methyl_rotator, // CH3 — 3 orientations (60° stagger from initial)
-    aromatic_methyl, // Aromatic CH3 — same as methyl
     nh2_rotator, // NH2 (non-PRO neutral N-term, PRO NH2+) — 12 orientations at 30°
     amide_flip, // Asn/Gln — 2 orientations (original + O↔N swap)
-    his_flip, // His — 6 orientations (2 flip × 3 protonation)
+    his_flip, // His — 4 orientations (2 flip × HID/HIE), or 2 (flip) for HIP
+    carboxyl_flip, // protonated Asp/Glu — 2 orientations (H on either oxygen)
 };
 
 pub const Orientation = struct {
@@ -97,8 +96,14 @@ pub const Mover = struct {
 
 /// Check if an atom is at the sentinel (absent) position.
 pub fn isAbsentH(atom: Atom) bool {
-    return atom.is_added and
-        atom.pos.x > 999.0 and atom.pos.y > 999.0 and atom.pos.z > 999.0;
+    return atom.is_added and isAbsentPos(atom.pos);
+}
+
+/// Whether a position is the `ABSENT_H_POS` sentinel. Absent H atoms of
+/// different movers share this position, so scoring and the interaction graph
+/// must skip them or they bump into each other.
+pub fn isAbsentPos(pos: Vec3(f32)) bool {
+    return pos.x > 999.0 and pos.y > 999.0 and pos.z > 999.0;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

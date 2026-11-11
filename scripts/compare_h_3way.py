@@ -5,12 +5,12 @@
 #     "gemmi",
 # ]
 # ///
-"""Three-way comparison: zreduce vs reduce2 vs ChimeraX.
+"""Three-way comparison: zhyd vs reduce2 vs ChimeraX.
 
 Compares hydrogen placement across all 11 test structures using
 distance-based matching with equivalent-H awareness.
 
-Note: reduce2 uses different default bond lengths than ChimeraX/zreduce,
+Note: reduce2 uses different default bond lengths than ChimeraX/zhyd,
 causing a systematic ~0.12A offset. This affects <0.1A% but not >=1.0A%
 (which reflects orientation/flip differences).
 
@@ -247,8 +247,8 @@ def dist_buckets(dists: list[float]) -> tuple[float, float, float, float]:
 
 def find_file(stem: str, tool: str) -> str | None:
     """Find output file for a structure and tool."""
-    if tool == "zreduce":
-        p = os.path.join(RESULT_DIR, f"{stem}-zreduce.cif")
+    if tool == "zhyd":
+        p = os.path.join(RESULT_DIR, f"{stem}-zhyd.cif")
         return p if os.path.exists(p) else None
     elif tool == "reduce2":
         p = os.path.join(REDUCE2_DIR, f"{stem}_reduce2.cif")
@@ -323,9 +323,9 @@ def print_detail(stem: str, rows: list[dict]):
             continue
 
         for pair, label in [
-            ("zc", "zreduce vs ChimeraX"),
+            ("zc", "zhyd vs ChimeraX"),
             ("rc", "reduce2 vs ChimeraX"),
-            ("zr", "zreduce vs reduce2"),
+            ("zr", "zhyd vs reduce2"),
         ]:
             r = row.get(pair)
             if r is None:
@@ -364,7 +364,7 @@ def main():
     for stem, desc in structures:
         row = {"stem": stem, "desc": desc}
         files = {
-            "z": find_file(stem, "zreduce"),
+            "z": find_file(stem, "zhyd"),
             "r": find_file(stem, "reduce2"),
             "c": find_file(stem, "chimerax"),
         }

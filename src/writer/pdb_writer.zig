@@ -29,7 +29,7 @@ const writeFixedFloat2 = format.writeFixedFloat2;
 /// PDB convention: 1-char elements start at column 14 (index 1), 2-char elements
 /// start at column 13 (index 0).
 /// Raw atom name string (trimmed) → 4-char space-padded array.
-fn formatAtomNamePdb(trimmed: []const u8, elem_sym: []const u8) [4]u8 {
+pub fn formatAtomNamePdb(trimmed: []const u8, elem_sym: []const u8) [4]u8 {
     var out = [4]u8{ ' ', ' ', ' ', ' ' };
     if (trimmed.len == 0) return out;
 
@@ -151,7 +151,7 @@ fn writeAtomLine(
     try writer.writeByte(chain_id);
 
     // cols 23-26: seq number (right-justified, 4 chars)
-    try writer.print("{d:>4}", .{res.auth_seq_id});
+    try writeResSeq(writer, res.auth_seq_id);
 
     // col 27: insertion code
     try writer.writeByte(if (res.ins_code == 0 or res.ins_code == ' ') ' ' else res.ins_code);
@@ -221,7 +221,7 @@ fn writeTerLine(
     try writer.writeByte(chain_id);
 
     // cols 23-26: seq number
-    try writer.print("{d:>4}", .{res.auth_seq_id});
+    try writeResSeq(writer, res.auth_seq_id);
 
     // col 27: insertion code
     try writer.writeByte(if (res.ins_code == 0 or res.ins_code == ' ') ' ' else res.ins_code);
@@ -235,6 +235,15 @@ fn chainId(chain: Chain) u8 {
     const s = chain.authSlice();
     if (s.len == 0) return ' ';
     return s[0];
+}
+
+/// Write a residue number right-aligned in 4 columns. Zig's `{d:>4}` prints
+/// a plus sign on positive signed integers, which breaks the resSeq field.
+fn writeResSeq(writer: anytype, seq: i32) !void {
+    var buf: [12]u8 = undefined;
+    const text = std.fmt.bufPrint(&buf, "{d}", .{seq}) catch unreachable;
+    try writer.splatByteAll(' ', 4 -| text.len);
+    try writer.writeAll(text);
 }
 
 // ── HETATM predicate for original atoms ──────────────────────────────────────
@@ -430,8 +439,8 @@ pub fn writeModel(
                     for (h_idx.slice(res_idx)) |ai| {
                         const a = model.atoms.items[ai];
                         if (mover_mod.isAbsentH(a)) continue;
-                        // Added H atoms always use ATOM record type (not HETATM)
-                        try writeAtomLine(writer, a, res, cid, serial, false, output_isotope);
+                        // Same record type as the residue's heavy atoms (HETATM for ligands, as reduce writes them)
+                        try writeAtomLine(writer, a, res, cid, serial, hetatm, output_isotope);
                         serial += 1;
                     }
                 }
@@ -565,4 +574,46 @@ test "PDB writer HETATM records" {
     // 5 polymer ATOM + 4 non_polymer/water HETATM
     try testing.expectEqual(@as(usize, 5), atom_count);
     try testing.expectEqual(@as(usize, 4), hetatm_count);
+}
+
+test "PDB writer writes added ligand H as HETATM" {
+    const pdb_parse_mod = @import("../pdb.zig");
+    const source = @embedFile("../test_data/hetatm.pdb");
+    var result = try pdb_parse_mod.parse(testing.allocator, source);
+    defer result.deinit(testing.allocator);
+    // Add an H to the EDO residue by hand (its fixture coordinates are linear,
+    // so placement cannot derive one).
+    const mdl = &result.model;
+    const edo_res = for (mdl.residues.items, 0..) |r, i| {
+        if (std.mem.eql(u8, r.compIdSlice(), "EDO")) break i;
+    } else return error.TestUnexpectedResult;
+    var h = mdl.atoms.items[mdl.residues.items[edo_res].atom_start];
+    h.setName("H11");
+    h.element_type = .H;
+    h.is_hydrogen = true;
+    h.is_added = true;
+    h.pos.y += 1.09;
+    try mdl.atoms.append(mdl.allocator, h);
+
+    var buf: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer buf.deinit();
+    try writeModel(&buf.writer, &result.model, result.records.items, .hydrogen);
+
+    var edo_h: usize = 0;
+    var line_it = std.mem.splitScalar(u8, buf.writer.buffered(), '\n');
+    while (line_it.next()) |line| {
+        if (line.len < 78 or !std.mem.eql(u8, line[17..20], "EDO")) continue;
+        try testing.expect(std.mem.eql(u8, line[0..6], "HETATM"));
+        if (line[77] == 'H') edo_h += 1;
+    }
+    try testing.expect(edo_h > 0);
+}
+
+test "residue numbers are written without a plus sign" {
+    var buf: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer buf.deinit();
+    try writeResSeq(&buf.writer, 1);
+    try writeResSeq(&buf.writer, -12);
+    try writeResSeq(&buf.writer, 1234);
+    try testing.expectEqualStrings("   1 -121234", buf.writer.buffered());
 }

@@ -21,10 +21,11 @@ pub const MoverHint = enum(u3) {
     none,
     rotate, // OH, SH
     rotate_nh3, // NH3+
-    rotate_methyl, // CH3
+    rotate_methyl, // CH3: placed staggered and not optimized (no mover)
     rotate_nh2, // NH2 (N-terminal PRO NH2+, neutral primary amine)
     flip_amide, // Asn/Gln
     flip_his, // His
+    flip_carboxyl, // protonated Asp/Glu (proton on either oxygen)
 };
 
 pub const AtomTypeInfo = struct {

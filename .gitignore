@@ -10,3 +10,6 @@ __pycache__/
 # pixi environments
 .pixi/
 pixi.lock
+
+# Third-party datasets (not redistributable; see data/external/SOURCES.md)
+/data/
