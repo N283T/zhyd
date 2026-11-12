@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
 ### Changed
 - Cliques beyond the brute-force limit are solved exactly by variable
   elimination over their score tables instead of iterative greedy search,
@@ -70,8 +72,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and the KaML time-stamped set with no PKAD-R structure or 30 % sequence
   homolog; results for all engines are in the empirical-engine spec
 - `zhyd pka` without PROPKA now defaults to the empirical engine in zhyd
-  mode (`zhyd-empirical-v1.2`); `--engine builtin` keeps the v0.2 model,
+  mode (now `zhyd-empirical-v1.4`); `--engine builtin` keeps the v0.2 model,
   which `--model-only` selects implicitly
+- `run --ph VALUE` (also `batch`): protonation states from the empirical
+  engine's predicted pKa at that pH (HIS → HIP, ASP/GLU → protonated,
+  LYS → neutral, CYS → thiolate; TYR, ARG and termini keep their defaults).
+  The optimizer still picks tautomers and orientations: a pKa-derived HIP
+  keeps a two-orientation ring flip, and a protonated Asp/Glu gets a new
+  `carboxyl_flip` mover that picks the oxygen. `--protonation` entries win.
+  `PROTONATED` is a new ASP/GLU override state and `carboxyl` a new fix-file
+  target. Output without `--ph` is unchanged (#276)
+- Q9 correction in zhyd mode: an acid–base pair interaction is weighted by
+  the ion-pair population of the proton-transfer equilibrium instead of
+  being switched fully on or off, which removes a threshold jump in the
+  coupled pKa (HCA II His107: 10.87 → 6.80, experiment < 3.5) (#277)
+- `zhyd-empirical-v1.4`: CYS, TYR and HIS refitted with Q9 and a desolvation
+  scale floor of 0.5 (fit-row MAE 0.7612, best so far; literature set pH 7
+  state agreement 36/38); fit record `scripts/pka/params/zhyd-empirical-v1.4.json`
+  (#277). `zhyd-empirical-v1.3` (#275) recalibrated the table from the parity
+  values
+- Literature pKa evaluation set `scripts/pka/eval/literature-2026-11.csv`
+  (47 rows with upper bounds) and `scripts/pka/score_literature.py`, which
+  scores point MAE, upper bounds and protonation state at a pH (#275)
 - Experimental, independently implemented staged protein pKa predictor for
   ASP/GLU/HIS/LYS/CYS/TYR and peptide termini (`zhyd pka`), with explicit
   model, burial, hydrogen-bond, electrostatic, and mean-field coupling terms
