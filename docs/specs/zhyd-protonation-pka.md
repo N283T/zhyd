@@ -385,9 +385,30 @@ was produced by a one-off join that cannot be reproduced; the net gain there
 with the `pka` report's recommended states at every one of 659 compared
 sites.
 
-Open: His pKa that are too high (SNase His121/His124, LCC-ICCG His242) are
-the main loss before `--ph` could become a default; anti carboxylic acid
-conformers; ensemble or microstate treatment of coupled sites (Phase 5).
+**His corrections tried (none adopted).** v1.4 His predictions are nearly
+unbiased on the fitting rows (mean signed error −0.11, MAE 0.79). Their
+residual grows with the hydrogen-bond term (no H-bond −0.31, H-bond ≥ 1
++0.93) and the electrostatic term (r = +0.32). Four post-hoc corrections of
+the His prediction were fitted on the fitting rows only, scored by
+leave-one-cluster-out CV and compared with the v1.4 His MAE of 0.787:
+
+| Correction | LOCO MAE | pH 7 net (v1.4 +3) | Other pH |
+|---|---|---|---|
+| Scale the H-bond term | 0.798 | +3 | pH 8: −4 (v1.4 −1) |
+| Scale the electrostatic term | 0.805 | +5 | pH 6: +83 (v1.4 +92) |
+| Raise model pKa and scale both terms | 0.781 | +6 | pH 6: +81, pH 8: −3 |
+| HIP only at pKa ≥ pH + m (in-sample) | — | +11 at m = 0.25 | pH 6: +81, pH 6.5: +26 (v1.4 +29) |
+
+None is better than v1.4 over the pH range. The margin's pH 7 gain comes
+mostly from repeated measurements of RNase A His105/His119 (7RSA), which are
+predicted 7.0–7.1. The His losses near pH 7 are the spread of an unbiased
+predictor with an MAE of about 0.8 around a threshold where many His pKa lie;
+no simple correction removes them. SNase and the literature set were not used
+to choose any of these.
+
+Open: a His model that resolves the near-threshold cases, which needs more
+than a rescaled term (per-determinant data or coupled microstates, Phase 5);
+anti carboxylic acid conformers.
 
 ### Phase 5 — microstates and new chemistries (not started)
 
