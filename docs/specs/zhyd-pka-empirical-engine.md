@@ -1,6 +1,6 @@
 # zhyd empirical pKa engine — specification
 
-Status: draft r9 (2026-11-19); parity mode implemented and accepted with
+Status: draft r10 (2026-11-19); parity mode implemented and accepted with
 documented deviations (see [Parity status](#parity-status-r2)); zhyd mode
 corrections Q1–Q8 implemented, measured and adopted (see
 [zhyd mode ablation](#zhyd-mode-ablation-r3)), Q9 in
@@ -513,6 +513,7 @@ These are reproduced in parity mode and corrected in zhyd mode:
 | Q7 | Averaging 99.99 for conformations where a site does not titrate yields values like 52.96 | average over titrating conformations only; values outside the physical range flagged `pka_outside_physical_range` |
 | Q8 | Insertion-code artefacts of [Conformations](#conformations): matching ignores the insertion code, only the last residue of a (chain, number) family exists after the first conformation, an absent conformation counts as 0, and N-termini extend to the whole family | full residue identity everywhere; every residue present in every conformation; mean over the conformations in which the site exists |
 | Q9 | Acid–base pairs of the [iterative scheme](#iterative-scheme) get their interaction all or nothing at k₁ = k₂, so a small change elsewhere can move a buried site by 2(c + h) | interaction weighted by the ion-pair population (r8) |
+| Q10 | The iterative scheme assigns each pair's interaction by iterated pKa comparisons (a mean-field treatment of coupled sites) | exact coupled microstates per connected pair component (r10; available, not adopted) |
 
 ### zhyd mode rules (r3)
 
@@ -581,6 +582,24 @@ mentioned here are unchanged from parity mode.
   (A⁻·BH⁺, stabilised by W) and the neutral pair (AH·B): w is the ion-pair
   share. The persistent corrections become aᵢ −= w·qᵢ·c and aᵢ −= w·qᵢ·h.
   Like-charged pairs keep their parity rule.
+- **Q10 (coupled microstates, r10; not in the default set).** The groups
+  joined by iterative pairs are split into connected components. For a
+  component of at most 12 groups, every protonation microstate x is weighted
+  by 10^(−G(x, pH)) with
+  G(x, pH) = Σᵢ xᵢ (pH − p⁰ᵢ) + Σ_pairs E(x),
+  where xᵢ = 1 when group i is protonated and p⁰ᵢ is its pKa without these
+  pairs. For a pair with H-bond h and Coulomb c, an acid is charged when
+  deprotonated and a base when protonated:
+  - opposite charges, both charged: E = −(c + h);
+  - like charges, both charged: E = +c;
+  - like charges, exactly one charged: E = −h.
+
+  A group's pKa is the last downward crossing of its protonated fraction
+  through 0.5 (pH −10 to 30, 0.25 grid, then bisection). Its shift from p⁰
+  is reported as the `coupling` term, and these pairs have no determinants.
+  Larger components use the iterative scheme. A single dominant pair
+  reproduces the parity shifts: +(c + h) and −(c + h) for an acid–base pair;
+  +(c + h) for the higher acid and −h for the lower one of two acids.
 
 ### zhyd mode evaluation protocol (r3)
 
@@ -1034,6 +1053,27 @@ LCC-ICCG His242 (4.8; 7.66) in both structures.
 
 Fit record: `scripts/pka/params/zhyd-empirical-v1.4.json`.
 
+### Q10 coupled microstates (r10)
+
+Q10 replaces the mean-field pair treatment for the groups it covers. On the
+v1.4 table (no refit), merged set, MAE:
+
+| Rows | v1.4 | v1.4 + Q10 |
+|---|---|---|
+| Fitting rows, all kinds (880) | 0.762 | 0.758 |
+| HIS (190) | 0.787 | 0.784 |
+| CYS (53) | 1.780 | 1.742 |
+| SNase stress set (102) | 0.962 | 0.953 |
+| Literature set (28 points) | 0.94 | 0.95 |
+
+Protonation-state agreement (`scripts/pka/score_states.py`, pH 6, 7 and 8)
+is within one site of v1.4 on the fitting rows and identical on SNase. On
+the literature set it is 36 of 38 for both, and LCC-ICCG His242 stays at 7.66.
+`pka` on the 233 merged-set structures takes 3.9 s instead of 2.6 s (8
+threads). The His errors near pH 7 therefore do not come from the
+mean-field pair treatment, and Q10 is not adopted. It stays available
+(`--empirical-fixes Q1,…,Q10`) as the basis for microstate probabilities.
+
 ## Revision log
 
 | Rev | Date | Change |
@@ -1048,3 +1088,4 @@ Fit record: `scripts/pka/params/zhyd-empirical-v1.4.json`.
 | r7 | 2026-11-09 | Recalibration from the parity table (calibration script no longer inherits the binary's built-in table): `zhyd-empirical-v1.3` with CYS and HIS desolvation; TYR desolvation 0 dropped; new literature check; acid–base pair threshold recorded as a known issue |
 | r8 | 2026-11-10 | Q9: acid–base pairs of the iterative scheme weighted by the ion-pair population (adopted; zhyd mode Q1–Q9). Recalibration with Q9 and a desolvation floor of 0.5 for every kind: `zhyd-empirical-v1.4` (CYS, TYR, HIS). Parity-table name `zhyd-empirical-v1` now always means Q1–Q8 |
 | r9 | 2026-11-19 | Per-partner determinant output (`pka --determinants`) |
+| r10 | 2026-11-19 | Q10: coupled microstates for iterative pairs (implemented, measured, not adopted) |

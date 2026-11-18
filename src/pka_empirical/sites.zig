@@ -89,6 +89,9 @@ pub const Group = struct {
     side_chain: f64 = 0,
     backbone: f64 = 0,
     coulomb: f64 = 0,
+    /// Q10: shift from the coupled-microstate titration of the group's
+    /// pair component (replaces its iterative side-chain and Coulomb pairs).
+    coupling: f64 = 0,
 
     pub fn isTitratable(self: Group) bool {
         return self.kind != null and !self.disulfide and !self.coupled_out;
@@ -100,7 +103,7 @@ pub const Group = struct {
     }
 
     pub fn total(self: Group) f64 {
-        return self.model_pka + self.desolvation + self.reorganisation + self.side_chain + self.backbone + self.coulomb;
+        return self.model_pka + self.desolvation + self.reorganisation + self.side_chain + self.backbone + self.coulomb + self.coupling;
     }
 };
 

@@ -20,6 +20,7 @@ pub const sites = @import("pka_empirical/sites.zig");
 pub const desolvation = @import("pka_empirical/desolvation.zig");
 pub const interactions = @import("pka_empirical/interactions.zig");
 pub const iterative = @import("pka_empirical/iterative.zig");
+pub const microstates = @import("pka_empirical/microstates.zig");
 pub const engine = @import("pka_empirical/engine.zig");
 
 pub const parity_engine_name = "zhyd-empirical (parity)";
@@ -132,6 +133,7 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, options: Options
                 .burial = @floatCast(s.burial),
                 .hydrogen_bond = @floatCast(s.hydrogen_bond),
                 .electrostatic = @floatCast(s.electrostatic),
+                .coupling = @floatCast(s.coupling),
             },
             .predicted_pka = @floatCast(s.predicted),
             .burial_fraction = @floatCast(s.weight),

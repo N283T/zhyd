@@ -362,7 +362,11 @@ recommended states at every one of 659 compared sites.
 Open: anti carboxylic acid conformers; ensemble or microstate treatment of
 coupled sites (Phase 5); the acid–base pair threshold (Q9 candidate).
 
-### Phase 5 — microstates and new chemistries (not started)
+### Phase 5 — microstates and new chemistries (started)
+
+Exact coupled microstates for the empirical engine's pair components are
+implemented as Q10 (empirical spec r10). They are opt-in and not adopted: on
+the evaluation sets they change MAE by under 0.01 and the states not at all.
 
 - Exact/sampled coupled microstates with normalized probabilities and ensemble
   provenance; then ligand, nucleic-acid, and metal-aware providers under separate

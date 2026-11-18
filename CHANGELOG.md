@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   per-partner side-chain, backbone and Coulomb contributions (partner
   residue, group type, term, value), as PROPKA's determinants do. They add up
   to the `hydrogen_bond` and `electrostatic` terms; other values are unchanged
+- Q10 for the empirical engine (opt-in, `--empirical-fixes Q1,...,Q10`):
+  exact coupled microstates for each connected component of up to 12 groups
+  joined by iterative pairs, instead of iterated pair assignments. The shift
+  is reported as the `coupling` term. It is not in the default set: it
+  changes MAE by under 0.01 and protonation states not at all
 
 ## [0.4.0] - 2026-11-13
 
