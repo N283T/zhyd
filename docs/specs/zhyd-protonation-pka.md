@@ -341,26 +341,53 @@ without optimization the first oxygen keeps it. The same `PROTONATED` state
 is available in override files. `--state-json` reports these sites with
 source `pka_predicted` and the chosen tautomer or oxygen.
 
-**State agreement at pH 7** (sites whose experimental pKa is on the same
-side of 7 as the applied state, both counted as protonated at pKa ≥ 7), with
-the default engine `zhyd-empirical-v1.4`:
+**State agreement** (`scripts/pka/score_states.py`, engine
+`zhyd-empirical-v1.4`). A site agrees when the applied state and the
+experimental pKa are on the same side of the pH (protonated at pKa ≥ pH).
+Only sites whose applied state differs from the default can gain or lose:
+"right − wrong" counts them, and the 95 % interval of the net gain is a
+bootstrap over clusters (fitting rows) or structures (SNase). Excluded and
+unmatched sites are skipped; `run --ph` leaves them in the default state, so
+the net gain does not depend on them.
 
-| Set | Default states | `--ph 7` |
-|---|---|---|
-| Fitting rows, HIS/ASP/GLU/LYS/CYS (841) | 728 | 746 |
-| Literature set 2026-11 (38) | 38 | 36 |
+| Set | pH | Sites | Default | `--ph` | Right − wrong | Net (95 % CI) |
+|---|---|---|---|---|---|---|
+| Fitting rows (112 clusters) | 6 | 823 | 632 | 739 | 152 − 45 | +107 [+52, +174] |
+| | 7 | 823 | 717 | 731 | 40 − 26 | +14 [−11, +37] |
+| | 8 | 823 | 760 | 772 | 28 − 16 | +12 [−3, +27] |
+| SNase stress set (49 structures) | 6 | 102 | 62 | 86 | 34 − 10 | +24 [+13, +34] |
+| | 7 | 102 | 75 | 85 | 18 − 8 | +10 [+1, +19] |
+| | 8 | 102 | 82 | 88 | 16 − 10 | +6 [−4, +15] |
+| Literature set 2026-11 | 7 | 38 | 38 | 36 | 0 − 2 | −2 |
 
-The gate study above used v1.3 predictions (the engine of the time). For
-comparison, the same fitting-row count is 752 under v1.3 and 753 under
-v1.3 + Q9 (see the empirical engine specification, r8). The fitting-row gain is in-sample for
-CYS, TYR and HIS (their parameters were fitted on these rows). The
-literature set is mostly His with pKa below 7, so the default is always
-right there and only losses can show: LCC-ICCG His242 in two structures.
-The states applied by `run --ph 7` agree with the `pka` report's
-recommended states at every one of 659 compared sites.
+How independent each set is:
 
-Open: anti carboxylic acid conformers; ensemble or microstate treatment of
-coupled sites (Phase 5); the acid–base pair threshold (Q9 candidate).
+- **SNase** rows were never used for fitting or for any rule choice. Its
+  buried Asp/Glu with raised pKa are the cases the default gets wrong. One
+  protein, so the structure bootstrap understates the spread.
+- **Fitting rows.** The v1.4 nested 5-fold cluster CV chose the final point
+  in every outer fold for CYS, TYR and HIS, so these predictions are the
+  nested-CV held-out predictions. They are not fully independent: the 0.5
+  desolvation floor, the Q9 form and this Phase 4 rule were chosen by looking
+  at the same rows, and the kinds were fitted one after another.
+- **Literature set.** Mostly His with pKa below 7, so the default is always
+  right there and only losses can show: LCC-ICCG His242 in two structures.
+
+Per kind at pH 7, HIS is the weak point: 18 − 15 on the fitting rows, 0 − 2
+on SNase (His121 and His124 predicted up to 1.7 too high) and 0 − 2 on the
+literature set. Asp/Glu gain on SNase (17 − 5), CYS on the fitting rows
+(11 − 4) and LYS is neutral to positive. At pH 6 the default (neutral His)
+is wrong for most His, and `--ph` recovers 121 of them on the fitting rows.
+
+These counts replace the earlier pH 7 table (728 → 746 of 841 sites), which
+was produced by a one-off join that cannot be reproduced; the net gain there
+(+18) is within the interval above. The states applied by `run --ph 7` agree
+with the `pka` report's recommended states at every one of 659 compared
+sites.
+
+Open: His pKa that are too high (SNase His121/His124, LCC-ICCG His242) are
+the main loss before `--ph` could become a default; anti carboxylic acid
+conformers; ensemble or microstate treatment of coupled sites (Phase 5).
 
 ### Phase 5 — microstates and new chemistries (not started)
 
