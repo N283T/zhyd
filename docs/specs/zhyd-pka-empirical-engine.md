@@ -1,6 +1,6 @@
 # zhyd empirical pKa engine — specification
 
-Status: draft r8 (2026-11-10); parity mode implemented and accepted with
+Status: draft r9 (2026-11-19); parity mode implemented and accepted with
 documented deviations (see [Parity status](#parity-status-r2)); zhyd mode
 corrections Q1–Q8 implemented, measured and adopted (see
 [zhyd mode ablation](#zhyd-mode-ablation-r3)), Q9 in
@@ -466,6 +466,16 @@ j < i, iterating i ascending then j ascending.
 
 pKa = model + desolvation + reorganisation + Σ side-chain + Σ backbone +
 Σ Coulomb determinants.
+
+**Determinant output (r9).** With `pka --determinants` the report lists
+every partner contribution to a site: the partner residue and group type,
+the term (`side_chain`, `backbone` or `coulomb`) and the value. For an
+iterative pair, the value is the final contribution that is added to the
+site, after the threshold. Values are averaged over conformations with the
+same denominator as the site's terms. Contributions below 0.005 are omitted.
+The `side_chain` and `backbone` entries therefore add up to `hydrogen_bond`,
+and the `coulomb` entries to `electrostatic`, within those omissions.
+Asking for determinants changes no value.
 
 ## Covalent coupling
 
@@ -1037,3 +1047,4 @@ Fit record: `scripts/pka/params/zhyd-empirical-v1.4.json`.
 | r6 | 2026-11-07 | Recalibration on PKAD-R merged with the external set (nested cluster CV): `zhyd-empirical-v1.2` with CYS, TYR and HIS parameters |
 | r7 | 2026-11-09 | Recalibration from the parity table (calibration script no longer inherits the binary's built-in table): `zhyd-empirical-v1.3` with CYS and HIS desolvation; TYR desolvation 0 dropped; new literature check; acid–base pair threshold recorded as a known issue |
 | r8 | 2026-11-10 | Q9: acid–base pairs of the iterative scheme weighted by the ion-pair population (adopted; zhyd mode Q1–Q9). Recalibration with Q9 and a desolvation floor of 0.5 for every kind: `zhyd-empirical-v1.4` (CYS, TYR, HIS). Parity-table name `zhyd-empirical-v1` now always means Q1–Q8 |
+| r9 | 2026-11-19 | Per-partner determinant output (`pka --determinants`) |

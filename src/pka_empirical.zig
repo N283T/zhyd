@@ -57,6 +57,8 @@ pub const Options = struct {
     /// Per-kind model pKa / desolvation scale overrides (`--parameters`,
     /// zhyd mode only), applied on top of the mode's parameter table.
     overrides: ?params.Overrides = null,
+    /// Report each site's per-partner determinants (`pka --determinants`).
+    determinants: bool = false,
 
     pub fn effectiveFixes(self: Options) Fixes {
         return self.fixes orelse self.mode.defaultFixes();
@@ -91,8 +93,15 @@ const NtermMode = @import("place/terminal.zig").NtermMode;
 pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, options: Options) !pka.Prediction {
     const parameters = options.parameters();
     const fixes = parameters.fixes;
-    const sums = try engine.run(allocator, mdl, parameters);
+    const result = try engine.runDetailed(allocator, mdl, parameters, options.determinants);
+    const sums = result.sums;
     defer allocator.free(sums);
+    defer allocator.free(result.determinants);
+    var store: std.ArrayListUnmanaged(pka.Determinant) = .empty;
+    errdefer store.deinit(allocator);
+    // (start, len) into `store` per output site, resolved to slices at the end.
+    var spans: std.ArrayListUnmanaged([2]u32) = .empty;
+    defer spans.deinit(allocator);
 
     const metals = try pka.metalPositions(allocator, mdl);
     defer allocator.free(metals);
@@ -131,15 +140,36 @@ pub fn predict(allocator: std.mem.Allocator, mdl: *const Model, options: Options
         site.confidence = pka.assessConfidence(site);
         if (!pka.isPhysicalPka(site.predicted_pka)) site.confidence = .low;
         try out_sites.append(allocator, site);
+        const start: u32 = @intCast(store.items.len);
+        for (result.determinants[s.det_start..][0..s.det_len]) |d| {
+            if (@abs(d.value) < 0.005) continue;
+            try store.append(allocator, .{
+                .partner_residue_idx = d.partner_residue,
+                .partner_group = @tagName(d.partner_type),
+                .term = switch (d.term) {
+                    .side_chain => .side_chain,
+                    .backbone => .backbone,
+                    .coulomb => .coulomb,
+                },
+                .value = @floatCast(d.value),
+            });
+        }
+        try spans.append(allocator, .{ start, @as(u32, @intCast(store.items.len)) - start });
     }
 
+    const owned_sites = try out_sites.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_sites);
+    const owned_store = try store.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_store);
+    for (owned_sites, spans.items) |*site, span| site.determinants = owned_store[span[0]..][0..span[1]];
     return .{
         .allocator = allocator,
-        .sites = try out_sites.toOwnedSlice(allocator),
+        .sites = owned_sites,
         .excluded = try excluded.toOwnedSlice(allocator),
         .omitted_sites = omitted,
         .parameter_version = parameters.version,
         .engine = options.engineName(),
+        .determinant_store = owned_store,
     };
 }
 

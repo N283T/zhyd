@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `zhyd pka --determinants` (empirical engine): each site's report lists its
+  per-partner side-chain, backbone and Coulomb contributions (partner
+  residue, group type, term, value), as PROPKA's determinants do. They add up
+  to the `hydrogen_bond` and `electrostatic` terms; other values are unchanged
+
 ## [0.4.0] - 2026-11-13
 
 ### Changed

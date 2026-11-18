@@ -169,6 +169,78 @@
                           "type": "number"
                         }
                       }
+                    },
+                    "determinants": {
+                      "description": "Per-partner contributions (empirical engine, pka --determinants). side_chain and backbone add up to terms.hydrogen_bond, coulomb to terms.electrostatic; contributions below 0.005 are omitted.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "partner",
+                          "term",
+                          "value"
+                        ],
+                        "properties": {
+                          "partner": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "chain_auth",
+                              "comp_id",
+                              "auth_seq_id",
+                              "ins_code",
+                              "group"
+                            ],
+                            "properties": {
+                              "chain_auth": {
+                                "type": "string"
+                              },
+                              "comp_id": {
+                                "type": "string"
+                              },
+                              "auth_seq_id": {
+                                "type": "integer"
+                              },
+                              "ins_code": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "group": {
+                                "type": "string",
+                                "enum": [
+                                  "coo",
+                                  "his",
+                                  "cys",
+                                  "tyr",
+                                  "lys",
+                                  "arg",
+                                  "nterm",
+                                  "roh",
+                                  "amd",
+                                  "trp",
+                                  "bbn",
+                                  "bbc",
+                                  "ion"
+                                ]
+                              }
+                            }
+                          },
+                          "term": {
+                            "type": "string",
+                            "enum": [
+                              "side_chain",
+                              "backbone",
+                              "coulomb"
+                            ]
+                          },
+                          "value": {
+                            "type": "number"
+                          }
+                        }
+                      }
                     }
                   }
                 },

@@ -335,6 +335,37 @@ test "real-file pka: 2cf8 disulfide cysteines excluded, values bounded, determin
     }
 }
 
+test "real-file pka: empirical determinants add up to the H-bond and Coulomb terms" {
+    var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
+    defer mdl.deinit();
+    var plain = try zhyd.pka_empirical.predict(testing.allocator, &mdl, .{ .mode = .zhyd });
+    defer plain.deinit();
+    var detailed = try zhyd.pka_empirical.predict(testing.allocator, &mdl, .{ .mode = .zhyd, .determinants = true });
+    defer detailed.deinit();
+
+    try testing.expectEqual(plain.sites.len, detailed.sites.len);
+    var n_with: usize = 0;
+    for (plain.sites, detailed.sites) |a, b| {
+        // Asking for determinants changes no value.
+        try testing.expect(a.determinants.len == 0);
+        try testing.expectEqual(a.predicted_pka, b.predicted_pka);
+        try testing.expectEqual(a.terms.hydrogen_bond, b.terms.hydrogen_bond);
+        try testing.expectEqual(a.terms.electrostatic, b.terms.electrostatic);
+
+        var hbond: f32 = 0;
+        var coulomb: f32 = 0;
+        for (b.determinants) |d| switch (d.term) {
+            .side_chain, .backbone => hbond += d.value,
+            .coulomb => coulomb += d.value,
+        };
+        if (b.determinants.len > 0) n_with += 1;
+        // Contributions below 0.005 are not reported.
+        try testing.expectApproxEqAbs(b.terms.hydrogen_bond, hbond, 0.05);
+        try testing.expectApproxEqAbs(b.terms.electrostatic, coulomb, 0.05);
+    }
+    try testing.expect(n_with > 20);
+}
+
 test "real-file pka: crystal waters do not change structure terms" {
     var mdl = try loadForPka(testing.allocator, "examples/data/2cf8.cif.gz");
     defer mdl.deinit();
