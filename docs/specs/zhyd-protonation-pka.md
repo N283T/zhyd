@@ -406,9 +406,45 @@ predictor with an MAE of about 0.8 around a threshold where many His pKa lie;
 no simple correction removes them. SNase and the literature set were not used
 to choose any of these.
 
-Open: a His model that resolves the near-threshold cases, which needs more
-than a rescaled term (per-determinant data or coupled microstates, Phase 5);
-anti carboxylic acid conformers.
+**H-bond geometry for ambiguous His (not adopted).** Ring N partners within
+3.3 Å, at most 50° from the C–N direction, were classified as acceptor
+(carboxylate, backbone O, Asn/Gln O), donor (Lys, Arg, backbone N, Asn/Gln N,
+Trp) or either (hydroxyl, water, His). When the predicted pKa is within a
+band b of the pH, the rule makes His HIP only when both N have acceptors
+(three acceptor definitions). It either decides the state, vetoes a HIP call
+or promotes a neutral call. Summed over pH 6–8 on the fitting rows, the pKa
+rule alone gives +122. The best geometry rule gives +121 (it never applies)
+and the vetoes give +80 at most. Only 2 of 190 His have acceptor-only
+partners on both N, and exposed His are protonated without any specific
+acceptor, so a veto removes correct HIP calls at pH 6–6.5.
+
+**Per-determinant corrections (not adopted).** With `pka --determinants`
+(empirical spec r9), His residuals on the fitting rows depend on the
+partners:
+
+| Partner | His sites with it | Mean residual with / without |
+|---|---|---|
+| Asp/Glu side-chain H-bond | 37 | +0.47 / −0.25 |
+| His–His Coulomb | 31 | −0.57 / −0.02 |
+| Backbone C=O | 49 | +0.05 / −0.17 |
+
+SNase His121 and His124 are over-predicted by the same Glu H-bond and
+Coulomb pair. Scaling these partners' contributions, under leave-one-cluster-out
+CV on the fitting rows (v1.4 MAE 0.787), gives:
+
+| Scaled contribution | LOCO MAE | pH 6–8 state net |
+|---|---|---|
+| His–carboxylate H-bond only | 0.794 | unchanged to −2 |
+| His–carboxylate H-bond and Coulomb | 0.814 | unchanged to −3 |
+| His–His Coulomb (best: removed) | 0.770 | +1 to +3 against v1.4 |
+
+Only the His–His Coulomb change improves the CV MAE, and it does not improve
+the states. SNase MAE gets worse with it (0.838 → 0.884). His–His
+interactions are where the mean-field pair treatment is weakest, so they
+belong to coupled microstates (Phase 5).
+
+Open: a His model that resolves the near-threshold cases (coupled
+microstates, Phase 5); anti carboxylic acid conformers.
 
 ### Phase 5 — microstates and new chemistries (not started)
 
