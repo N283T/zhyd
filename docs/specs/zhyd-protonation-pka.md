@@ -443,8 +443,14 @@ the states. SNase MAE gets worse with it (0.838 → 0.884). His–His
 interactions are where the mean-field pair treatment is weakest, so they
 belong to coupled microstates (Phase 5).
 
-Open: a His model that resolves the near-threshold cases (coupled
-microstates, Phase 5); anti carboxylic acid conformers.
+**Coupled microstates (Q10, empirical spec r10; not adopted).** Exact
+microstates for the pair components change His MAE from 0.787 to 0.784 and no
+state at pH 6–8, so the near-threshold His losses do not come from the
+mean-field pair treatment either.
+
+Open: a His model that resolves the near-threshold cases needs information
+the PROPKA-type terms do not carry (for example a learned or physics-based
+model, or more measured His pKa near 7); anti carboxylic acid conformers.
 
 ### Phase 5 — microstates and new chemistries (not started)
 
