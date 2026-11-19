@@ -304,7 +304,13 @@ PROPKA's test error is dominated by a few CYS (test CYS MAE 15, including a
 `run --ph VALUE` (and `batch --ph`) runs the empirical engine in zhyd mode on
 each model and applies the macrostates it implies before placement. Without
 `--ph` placement is unchanged (27 example and literature structures give
-byte-identical output).
+byte-identical output). `--empirical-mode parity` uses the PROPKA 3 model
+instead, for states that follow PROPKA. zhyd mode is closer to experiment on
+the fitting rows; on the held-out sets the two are level (see "His against
+PROPKA 3" below). The applied state report's
+`parameter_version` names the parameter set behind the states
+(`zhyd-empirical-v1.4` or `zhyd-empirical-v1-parity`) and is null without
+`--ph`.
 
 **Why it is needed.** The optimizer never chooses a charge: the His flipper
 offers HID and HIE only (dot scoring has no charge or desolvation cost, so HIP

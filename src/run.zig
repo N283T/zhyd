@@ -30,6 +30,9 @@ pub const ProcessConfig = struct {
     /// pH for pKa-driven protonation states (spec Phase 4); null keeps the
     /// default states. User overrides still win.
     ph: ?f32 = null,
+    /// pKa model used under `ph`: the recalibrated zhyd mode or the PROPKA 3
+    /// model (parity).
+    ph_mode: zhyd.pka_empirical.Mode = .zhyd,
     fix_path: ?[]const u8 = null,
     dump_movers_path: ?[]const u8 = null,
     strip_h: bool = false,
@@ -157,9 +160,9 @@ fn processModelShared(
     var protonation_overrides: ?*const zhyd.place.ProtonationOverrides = user_overrides;
     if (config.ph) |ph| {
         // Same input as `zhyd pka`: default chemistry, then the empirical
-        // engine in zhyd mode.
+        // engine in the selected mode.
         zhyd.place.applyChemistryWithConfig(mdl, .{ .nterm_mode = config.nterm_mode });
-        var prediction = try zhyd.pka_empirical.predict(allocator, mdl, .{ .mode = .zhyd, .nterm_mode = config.nterm_mode });
+        var prediction = try zhyd.pka_empirical.predict(allocator, mdl, .{ .mode = config.ph_mode, .nterm_mode = config.nterm_mode });
         defer prediction.deinit();
         ph_overrides.* = try zhyd.ph_states.fromPrediction(allocator, mdl, &prediction, ph, user_overrides);
         protonation_overrides = &ph_overrides.*.?;
@@ -502,6 +505,7 @@ fn processFileMmcif(allocator: Allocator, config: ProcessConfig, source: []const
             state_path,
             config.input_path,
             config.output_path,
+            phParameterVersion(config),
             reports,
             if (protonation_overrides) |*ov| ov else null,
             config.nterm_mode,
@@ -655,6 +659,7 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
             state_path,
             config.input_path,
             config.output_path,
+            phParameterVersion(config),
             reports,
             if (protonation_overrides) |*ov| ov else null,
             config.nterm_mode,
@@ -665,10 +670,18 @@ fn processFilePdb(allocator: Allocator, config: ProcessConfig, source: []const u
     return result;
 }
 
+/// Parameter version of the pKa model behind `config.ph` (null without it).
+fn phParameterVersion(config: ProcessConfig) ?[]const u8 {
+    if (config.ph == null) return null;
+    const options: zhyd.pka_empirical.Options = .{ .mode = config.ph_mode, .nterm_mode = config.nterm_mode };
+    return options.parameters().version;
+}
+
 fn writeStateReportFile(
     path: []const u8,
     input_path: []const u8,
     coordinate_path: ?[]const u8,
+    parameter_version: ?[]const u8,
     reports: []const zhyd.writer.protonation_json.StateReportModel,
     overrides: ?*const zhyd.place.ProtonationOverrides,
     nterm_mode: zhyd.place.NtermMode,
@@ -678,7 +691,7 @@ fn writeStateReportFile(
     const file = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
     var fw = file.writer(io, &buffer);
-    try zhyd.writer.protonation_json.writeStateReport(&fw.interface, input_path, coordinate_path, reports, overrides, nterm_mode);
+    try zhyd.writer.protonation_json.writeStateReport(&fw.interface, input_path, coordinate_path, parameter_version, reports, overrides, nterm_mode);
     try fw.interface.flush();
 }
 

@@ -32,6 +32,8 @@ pub const BatchConfig = struct {
     nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
     ph: ?f32 = null,
+    /// pKa model used under `ph`.
+    ph_mode: zhyd.pka_empirical.Mode = .zhyd,
     fix_path: ?[]const u8 = null,
     strip_h: bool = false,
     gzip_output: bool = false,
@@ -194,6 +196,7 @@ fn processFileInBatch(
         .nterm_mode = config.nterm_mode,
         .protonation_path = config.protonation_path,
         .ph = config.ph,
+        .ph_mode = config.ph_mode,
         .fix_path = config.fix_path,
         .strip_h = config.strip_h,
         .format = run_mod.detectFormat(input_path),
