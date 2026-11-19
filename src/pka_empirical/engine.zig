@@ -13,18 +13,58 @@ const Parameters = params_mod.Parameters;
 const Group = sites.Group;
 const Model = model_mod.Model;
 
-/// Run steps 3–8 of the pipeline on one conformation.
-pub fn evaluate(allocator: std.mem.Allocator, conf: *sites.Conformation, params: Parameters) !void {
+/// Which determinant of a site a partner contributes to.
+pub const Term = enum { side_chain, backbone, coulomb };
+
+/// One partner's contribution to a site's pKa (PROPKA's "determinants").
+pub const Determinant = struct {
+    partner_residue: u32,
+    partner_type: sites.GroupType,
+    term: Term,
+    value: f64,
+};
+
+/// A determinant of group `group` in one conformation.
+pub const Recorded = struct {
+    group: u32,
+    determinant: Determinant,
+};
+
+const Recorder = std.ArrayListUnmanaged(Recorded);
+
+fn record(allocator: std.mem.Allocator, recorder: ?*Recorder, groups: []const Group, group: usize, partner: usize, term: Term, value: f64) !void {
+    const r = recorder orelse return;
+    if (value == 0) return;
+    try r.append(allocator, .{ .group = @intCast(group), .determinant = .{
+        .partner_residue = groups[partner].residue_idx,
+        .partner_type = groups[partner].gtype,
+        .term = term,
+        .value = value,
+    } });
+}
+
+/// Run steps 3–8 of the pipeline on one conformation. With a recorder, every
+/// partner contribution to a side-chain, backbone or Coulomb term is also
+/// appended to it.
+pub fn evaluate(allocator: std.mem.Allocator, conf: *sites.Conformation, params: Parameters, recorder: ?*Recorder) !void {
     const groups = conf.groups.items;
     desolvation.apply(conf, params);
 
     // Backbone H-bonds, ions, reorganisation.
-    for (groups) |*t| {
+    for (groups, 0..) |*t, ti| {
         if (!t.isTitratable()) continue;
-        for (groups) |*other| {
+        for (groups, 0..) |*other, oi| {
             switch (other.gtype) {
-                .bbn, .bbc => t.backbone += interactions.backboneDeterminant(conf, other, t, params),
-                .ion => t.coulomb += interactions.ionDeterminant(t, other, params),
+                .bbn, .bbc => {
+                    const v = interactions.backboneDeterminant(conf, other, t, params);
+                    t.backbone += v;
+                    try record(allocator, recorder, groups, ti, oi, .backbone, v);
+                },
+                .ion => {
+                    const v = interactions.ionDeterminant(t, other, params);
+                    t.coulomb += v;
+                    try record(allocator, recorder, groups, ti, oi, .coulomb, v);
+                },
                 else => {},
             }
         }
@@ -58,12 +98,30 @@ pub fn evaluate(allocator: std.mem.Allocator, conf: *sites.Conformation, params:
                 g2.side_chain += s.side_chain2;
                 g1.coulomb += s.coulomb1;
                 g2.coulomb += s.coulomb2;
+                try record(allocator, recorder, groups, i, j, .side_chain, s.side_chain1);
+                try record(allocator, recorder, groups, j, i, .side_chain, s.side_chain2);
+                try record(allocator, recorder, groups, i, j, .coulomb, s.coulomb1);
+                try record(allocator, recorder, groups, j, i, .coulomb, s.coulomb2);
             } else if (h > 0 or c > 0) {
                 try pairs.append(allocator, .{ .g1 = @intCast(i), .g2 = @intCast(j), .h = h, .c = c });
             }
         }
     }
     try iterative.solve(allocator, groups, pairs.items, params);
+    if (recorder != null) {
+        // The same threshold as `iterative.solve` uses when it adds them.
+        for (pairs.items) |pair| {
+            const parts = [_]struct { g: u32, p: u32, term: Term, v: f64 }{
+                .{ .g = pair.g1, .p = pair.g2, .term = .side_chain, .v = pair.side_chain1 },
+                .{ .g = pair.g2, .p = pair.g1, .term = .side_chain, .v = pair.side_chain2 },
+                .{ .g = pair.g1, .p = pair.g2, .term = .coulomb, .v = pair.coulomb1 },
+                .{ .g = pair.g2, .p = pair.g1, .term = .coulomb, .v = pair.coulomb2 },
+            };
+            for (parts) |part| {
+                if (@abs(part.v) > params.min_contribution) try record(allocator, recorder, groups, part.g, part.p, part.term, part.v);
+            }
+        }
+    }
 }
 
 /// Two titratable groups whose group atoms are within three bonds of each
@@ -120,6 +178,10 @@ pub const SiteSum = struct {
     electrostatic: f64 = 0,
     weight: f64 = 0,
     center: sites.Vec = .{ .x = 0, .y = 0, .z = 0 },
+    /// Conformation-mean determinants, `Result.determinants[det_start..][0..det_len]`
+    /// (only from `runDetailed` with determinants requested).
+    det_start: u32 = 0,
+    det_len: u32 = 0,
 };
 
 /// Conformation average of one site identity: (chain, residue number, site
@@ -131,6 +193,18 @@ const Accumulator = struct {
     key: Identity,
     residues: [16]u32 = undefined,
     n_residues: usize = 0,
+    /// Determinant sums over conformations, one entry per (partner, term).
+    dets: std.ArrayListUnmanaged(Determinant) = .empty,
+
+    fn addDeterminant(self: *Accumulator, allocator: std.mem.Allocator, d: Determinant) !void {
+        for (self.dets.items) |*e| {
+            if (e.partner_residue == d.partner_residue and e.partner_type == d.partner_type and e.term == d.term) {
+                e.value += d.value;
+                return;
+            }
+        }
+        try self.dets.append(allocator, d);
+    }
 
     fn addResidue(self: *Accumulator, residue_idx: u32) void {
         if (std.mem.indexOfScalar(u32, self.residues[0..self.n_residues], residue_idx) != null) return;
@@ -168,10 +242,27 @@ fn findAcc(allocator: std.mem.Allocator, accs: *std.ArrayListUnmanaged(Accumulat
 
 /// Evaluate every conformation of `mdl` and average per site.
 pub fn run(allocator: std.mem.Allocator, mdl: *const Model, params: Parameters) ![]SiteSum {
+    const result = try runDetailed(allocator, mdl, params, false);
+    allocator.free(result.determinants);
+    return result.sums;
+}
+
+pub const Result = struct {
+    sums: []SiteSum,
+    /// Backing store of every site's determinants (`SiteSum.det_start`).
+    determinants: []Determinant,
+};
+
+/// `run`, optionally also averaging each site's determinants over
+/// conformations with the same denominator as its terms.
+pub fn runDetailed(allocator: std.mem.Allocator, mdl: *const Model, params: Parameters, want_determinants: bool) !Result {
     var letters_buf: [64]u8 = undefined;
     const letters = sites.altlocLetters(mdl, &letters_buf);
     var accs: std.ArrayListUnmanaged(Accumulator) = .empty;
-    defer accs.deinit(allocator);
+    defer {
+        for (accs.items) |*a| a.dets.deinit(allocator);
+        accs.deinit(allocator);
+    }
 
     const n_conf = @max(letters.len, 1);
     for (0..n_conf) |ci| {
@@ -179,7 +270,9 @@ pub fn run(allocator: std.mem.Allocator, mdl: *const Model, params: Parameters) 
         const first: ?u8 = if (letters.len == 0) null else letters[0];
         var conf = try sites.build(allocator, mdl, altloc, first, params);
         defer conf.deinit();
-        try evaluate(allocator, &conf, params);
+        var recorder: Recorder = .empty;
+        defer recorder.deinit(allocator);
+        try evaluate(allocator, &conf, params, if (want_determinants) &recorder else null);
         // Within one conformation the first group (input order) of each
         // identity supplies the value (amendment A12); every residue carrying
         // the identity reports it.
@@ -201,19 +294,41 @@ pub fn run(allocator: std.mem.Allocator, mdl: *const Model, params: Parameters) 
             const acc = try findAcc(allocator, &accs, Identity.of(&conf, g, params), g.residue_idx);
             acc.addResidue(g.residue_idx);
             addConformation(&acc.sum, g, ci == 0, params);
+            if (g.disulfide or g.coupled_out) continue;
+            for (recorder.items) |r| {
+                if (r.group == gi) try acc.addDeterminant(allocator, r.determinant);
+            }
         }
     }
 
     var out: std.ArrayListUnmanaged(SiteSum) = .empty;
     errdefer out.deinit(allocator);
+    var store: std.ArrayListUnmanaged(Determinant) = .empty;
+    errdefer store.deinit(allocator);
     for (accs.items) |*a| {
         var s = mean(a.sum, @intCast(n_conf), params);
+        const inv = inverseDenominator(a.sum, @intCast(n_conf), params);
+        s.det_start = @intCast(store.items.len);
+        s.det_len = @intCast(a.dets.items.len);
+        for (a.dets.items) |d| {
+            var scaled = d;
+            scaled.value *= inv;
+            try store.append(allocator, scaled);
+        }
         for (a.residues[0..a.n_residues]) |ri| {
             s.residue_idx = ri;
             try out.append(allocator, s);
         }
     }
-    return out.toOwnedSlice(allocator);
+    const sums = try out.toOwnedSlice(allocator);
+    errdefer allocator.free(sums);
+    return .{ .sums = sums, .determinants = try store.toOwnedSlice(allocator) };
+}
+
+/// 1 / the number of conformations a site's terms are averaged over.
+fn inverseDenominator(sum: SiteSum, n_conf: u32, params: Parameters) f64 {
+    const denominator: u32 = if (params.fixes.q7) sum.n_titrating else if (params.fixes.q8) sum.n else n_conf;
+    return if (denominator == 0) 0.0 else 1.0 / @as(f64, @floatFromInt(denominator));
 }
 
 /// Add one conformation's group to its site sum. A group that does not
@@ -243,9 +358,8 @@ pub fn addConformation(entry: *SiteSum, g: Group, first_conformation: bool, para
 /// still reported when it titrates in another).
 pub fn mean(sum: SiteSum, n_conf: u32, params: Parameters) SiteSum {
     var s = sum;
-    const denominator: u32 = if (params.fixes.q7) s.n_titrating else if (params.fixes.q8) s.n else n_conf;
     if (params.fixes.q7) s.not_titrating_first = false;
-    const inv = if (denominator == 0) 0.0 else 1.0 / @as(f64, @floatFromInt(denominator));
+    const inv = inverseDenominator(sum, n_conf, params);
     s.predicted *= inv;
     s.burial *= inv;
     s.hydrogen_bond *= inv;

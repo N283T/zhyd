@@ -266,7 +266,7 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
                 try writer.writeAll("\"");
             } else try writer.writeAll("null");
             try writer.print(", \"formal_charge\": {d}, \"source\": \"pka_predicted\", \"applies_to_coordinates\": false}}, ", .{state.formal_charge});
-            try writer.print("\"pka\": {{\"predicted\": {d:.4}, \"terms\": {{\"model\": {d:.4}, \"burial\": {d:.4}, \"hydrogen_bond\": {d:.4}, \"electrostatic\": {d:.4}, \"coupling\": {d:.4}}}, \"burial_fraction\": {d:.4}}}, ", .{
+            try writer.print("\"pka\": {{\"predicted\": {d:.4}, \"terms\": {{\"model\": {d:.4}, \"burial\": {d:.4}, \"hydrogen_bond\": {d:.4}, \"electrostatic\": {d:.4}, \"coupling\": {d:.4}}}, \"burial_fraction\": {d:.4}", .{
                 site.predicted_pka,
                 site.terms.model,
                 site.terms.burial,
@@ -275,7 +275,15 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
                 site.terms.coupling,
                 site.burial_fraction,
             });
-            try writer.writeAll("\"confidence\": \"");
+            if (site.determinants.len > 0) {
+                try writer.writeAll(", \"determinants\": [");
+                for (site.determinants, 0..) |d, di| {
+                    if (di > 0) try writer.writeAll(", ");
+                    try writeDeterminant(writer, entry.model, d);
+                }
+                try writer.writeAll("]");
+            }
+            try writer.writeAll("}, \"confidence\": \"");
             try writer.writeAll(@tagName(site.confidence));
             try writer.writeAll("\", \"warnings\": [");
             var wrote_warning = false;
@@ -314,6 +322,24 @@ pub fn writePredictionReport(writer: anytype, input: []const u8, models: []const
         try writer.writeAll("\n");
     }
     try writer.writeAll("  ]\n}\n");
+}
+
+fn writeDeterminant(writer: anytype, mdl: *const model_mod.Model, d: pka.Determinant) !void {
+    const res = mdl.residues.items[d.partner_residue_idx];
+    const chain = mdl.chains.items[res.chain_idx];
+    try writer.writeAll("{\"partner\": {\"chain_auth\": \"");
+    try writeJsonString(writer, chain.authSlice());
+    try writer.writeAll("\", \"comp_id\": \"");
+    try writeJsonString(writer, res.compIdSlice());
+    try writer.print("\", \"auth_seq_id\": {d}, \"ins_code\": ", .{res.auth_seq_id});
+    if (res.ins_code == ' ') {
+        try writer.writeAll("null");
+    } else {
+        try writer.print("\"{c}\"", .{res.ins_code});
+    }
+    try writer.writeAll(", \"group\": \"");
+    try writer.writeAll(d.partner_group);
+    try writer.print("\"}}, \"term\": \"{s}\", \"value\": {d:.4}}}", .{ @tagName(d.term), d.value });
 }
 
 fn writeSiteId(writer: anytype, mdl: *const model_mod.Model, residue_idx: u32, kind: pka.SiteKind) !void {

@@ -83,6 +83,18 @@ pub const Contributions = struct {
     }
 };
 
+pub const DeterminantTerm = enum { side_chain, backbone, coulomb };
+
+/// One partner's contribution to a site's pKa (empirical engine with
+/// determinants requested). `partner_group` names the partner's group type
+/// (`coo`, `his`, `bbc`, `ion`, ...).
+pub const Determinant = struct {
+    partner_residue_idx: u32,
+    partner_group: []const u8,
+    term: DeterminantTerm,
+    value: f32,
+};
+
 pub const SiteResult = struct {
     residue_idx: u32,
     kind: SiteKind,
@@ -92,6 +104,8 @@ pub const SiteResult = struct {
     burial_fraction: f32,
     confidence: Confidence,
     coupled: bool = false,
+    /// Slice of `Prediction.determinant_store`; empty unless requested.
+    determinants: []const Determinant = &.{},
 };
 
 pub const Prediction = struct {
@@ -103,12 +117,16 @@ pub const Prediction = struct {
     parameter_version: []const u8 = parameter_version,
     /// Which pKa engine produced these values.
     engine: []const u8 = engine_name,
+    /// Owns every site's `determinants`.
+    determinant_store: []Determinant = &.{},
 
     pub fn deinit(self: *Prediction) void {
         self.allocator.free(self.sites);
         self.allocator.free(self.excluded);
+        self.allocator.free(self.determinant_store);
         self.sites = &.{};
         self.excluded = &.{};
+        self.determinant_store = &.{};
     }
 };
 

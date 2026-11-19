@@ -38,6 +38,7 @@ const PkaConfig = struct {
     parameters_path: ?[]const u8 = null,
     engine: ?PkaEngine = null,
     propka_keep_waters: bool = false,
+    determinants: bool = false,
     empirical_mode: ?zhyd.pka_empirical.Mode = null,
     empirical_fixes: ?zhyd.pka_empirical.Fixes = null,
     show_timing: bool = false,
@@ -362,6 +363,8 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
             };
         } else if (std.mem.eql(u8, arg, "--propka-keep-waters")) {
             config.propka_keep_waters = true;
+        } else if (std.mem.eql(u8, arg, "--determinants")) {
+            config.determinants = true;
         } else if (std.mem.eql(u8, arg, "--engine")) {
             i += 1;
             if (i >= args.len) {
@@ -486,6 +489,8 @@ fn printPkaUsage() void {
         \\                       model, quirks included)
         \\    --empirical-fixes LIST  Override the empirical corrections: comma-separated
         \\                       Q1..Q9 (e.g. 'Q2,Q7') or 'none' (ablation)
+        \\    --determinants     Empirical engine: add each site's per-partner side-chain,
+        \\                       backbone and Coulomb contributions to the report
         \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file
         \\                       reproduction; default drops them like PDB2PQR)
         \\    --timing           Print a per-stage timing breakdown to stderr
@@ -944,8 +949,8 @@ fn resolvePkaOptions(allocator: Allocator, config: PkaConfig) ResolvedPka {
         std.debug.print("Error: --parameters applies to --engine builtin, or --engine empirical with --empirical-mode zhyd\n", .{});
         std.process.exit(1);
     }
-    if (engine != .empirical and (config.empirical_mode != null or config.empirical_fixes != null)) {
-        std.debug.print("Error: --empirical-mode and --empirical-fixes apply to --engine empirical only\n", .{});
+    if (engine != .empirical and (config.empirical_mode != null or config.empirical_fixes != null or config.determinants)) {
+        std.debug.print("Error: --empirical-mode, --empirical-fixes and --determinants apply to --engine empirical only\n", .{});
         std.process.exit(1);
     }
 
@@ -973,6 +978,7 @@ fn resolvePkaOptions(allocator: Allocator, config: PkaConfig) ResolvedPka {
         .mode = empirical_mode,
         .fixes = config.empirical_fixes,
         .overrides = if (resolved.parsed_overrides) |p| p.value else null,
+        .determinants = config.determinants,
     };
     switch (engine) {
         .builtin => std.debug.print("warning: pKa model {s} is experimental and not validated for production charge assignment\n", .{parameters.version}),

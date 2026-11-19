@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `zhyd pka --determinants` (empirical engine): each site's report lists its
+  per-partner side-chain, backbone and Coulomb contributions (partner
+  residue, group type, term, value), as PROPKA's determinants do. They add up
+  to the `hydrogen_bond` and `electrostatic` terms; other values are unchanged
 - `scripts/pka/score_states.py`: per-kind agreement of the default and the
   `run --ph` states with experiment, changed sites right/wrong and a
   bootstrap interval for the net gain. Phase 4 in the protonation spec now

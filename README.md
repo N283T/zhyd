@@ -77,6 +77,7 @@ zhyd compile-dict components.cif -o components.zccd
 # Experimental pKa report (does not change coordinates)
 zhyd pka input.cif -o pka.json
 zhyd pka input.cif --model-only -o model-pka-baseline.json
+zhyd pka input.cif --determinants -o pka.json   # per-partner contributions
 zhyd pka input_dir/ -o pka_dir/ -j 8 --jsonl pka.jsonl   # one <stem>.json per file
 ```
 
