@@ -11,6 +11,7 @@ import external_set
 import merge_sets
 import pkadr
 import score_literature
+import score_states
 
 
 def record(index, pdb, res="ASP", pka="4.0", name="P", similar="", warning=""):
@@ -392,6 +393,58 @@ class PkadrTests(unittest.TestCase):
         self.assertEqual(
             set(overrides["model_pka"]), set(calibrate_empirical.DEFAULT_MODEL_PKA)
         )
+
+    def test_state_scoring_counts_changed_sites(self):
+        def row(pdb, seq, kind, value, cluster="c1"):
+            return {
+                "entry_id": f"{pdb}-{seq}",
+                "pdb_id": pdb,
+                "chain": "A",
+                "auth_seq_id": str(seq),
+                "site": kind,
+                "experimental_pka": value,
+                "cluster_id": cluster,
+            }
+
+        def site(seq, kind, pka):
+            return {
+                "id": {"chain_auth": "A", "auth_seq_id": seq, "site": kind},
+                "pka": {"predicted": pka},
+            }
+
+        self.assertIs(score_states.applied_state("HIS", 7.0, 7.0), True)
+        self.assertIs(score_states.applied_state("LYS", 30.0, 7.0), True)
+        self.assertIs(score_states.applied_state("CYS", None, 7.0), True)
+        with tempfile.TemporaryDirectory() as tmp:
+            sites = [
+                site(1, "HIS", 7.5),  # HIP, experiment protonated: right
+                site(2, "ASP", 8.0),  # protonated, experiment not: wrong
+                site(3, "GLU", 4.0),  # default kept
+                site(4, "TYR", 6.0),  # never changed: not scored
+            ]
+            report = {"models": [{"sites": sites}]}
+            (Path(tmp) / "X.json").write_text(json.dumps(report))
+            rows = [
+                row("X", 1, "HIS", "7.2"),
+                row("X", 2, "ASP", "4.0", "c2"),
+                row("X", 3, "GLU", "8.0"),
+                row("X", 4, "TYR", "6.0"),
+                row("X", 5, "LYS", "10.0"),
+            ]
+            calls, missing = score_states.site_calls(rows, Path(tmp))
+        self.assertEqual(missing, ["X-5"])
+        self.assertEqual(
+            score_states.tally(calls, 7.0),
+            {"n": 3, "default": 1, "ph": 1, "right": 1, "wrong": 1},
+        )
+        self.assertIsNone(
+            score_states.bootstrap_net(calls[:1], 7.0, "cluster_id", 50, 0)
+        )
+        interval = score_states.bootstrap_net(calls, 7.0, "cluster_id", 200, 0)
+        assert interval is not None
+        low, high = interval
+        self.assertLessEqual(low, 0)
+        self.assertGreaterEqual(high, 0)
 
     def test_literature_scoring_handles_upper_bounds(self):
         def row(pdb, seq, value, qualifier="point"):

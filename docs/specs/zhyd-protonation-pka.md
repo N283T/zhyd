@@ -341,26 +341,116 @@ without optimization the first oxygen keeps it. The same `PROTONATED` state
 is available in override files. `--state-json` reports these sites with
 source `pka_predicted` and the chosen tautomer or oxygen.
 
-**State agreement at pH 7** (sites whose experimental pKa is on the same
-side of 7 as the applied state, both counted as protonated at pKa ≥ 7), with
-the default engine `zhyd-empirical-v1.4`:
+**State agreement** (`scripts/pka/score_states.py`, engine
+`zhyd-empirical-v1.4`). A site agrees when the applied state and the
+experimental pKa are on the same side of the pH (protonated at pKa ≥ pH).
+Only sites whose applied state differs from the default can gain or lose:
+"right − wrong" counts them, and the 95 % interval of the net gain is a
+bootstrap over clusters (fitting rows) or structures (SNase). Excluded and
+unmatched sites are skipped; `run --ph` leaves them in the default state, so
+the net gain does not depend on them.
 
-| Set | Default states | `--ph 7` |
+| Set | pH | Sites | Default | `--ph` | Right − wrong | Net (95 % CI) |
+|---|---|---|---|---|---|---|
+| Fitting rows (112 clusters) | 6 | 823 | 632 | 739 | 152 − 45 | +107 [+52, +174] |
+| | 7 | 823 | 717 | 731 | 40 − 26 | +14 [−11, +37] |
+| | 8 | 823 | 760 | 772 | 28 − 16 | +12 [−3, +27] |
+| SNase stress set (49 structures) | 6 | 102 | 62 | 86 | 34 − 10 | +24 [+13, +34] |
+| | 7 | 102 | 75 | 85 | 18 − 8 | +10 [+1, +19] |
+| | 8 | 102 | 82 | 88 | 16 − 10 | +6 [−4, +15] |
+| Literature set 2026-11 | 7 | 38 | 38 | 36 | 0 − 2 | −2 |
+
+How independent each set is:
+
+- **SNase** rows were never used for fitting or for any rule choice. Its
+  buried Asp/Glu with raised pKa are the cases the default gets wrong. One
+  protein, so the structure bootstrap understates the spread.
+- **Fitting rows.** The v1.4 nested 5-fold cluster CV chose the final point
+  in every outer fold for CYS, TYR and HIS, so these predictions are the
+  nested-CV held-out predictions. They are not fully independent: the 0.5
+  desolvation floor, the Q9 form and this Phase 4 rule were chosen by looking
+  at the same rows, and the kinds were fitted one after another.
+- **Literature set.** Mostly His with pKa below 7, so the default is always
+  right there and only losses can show: LCC-ICCG His242 in two structures.
+
+Per kind at pH 7, HIS is the weak point: 18 − 15 on the fitting rows, 0 − 2
+on SNase (His121 and His124 predicted up to 1.7 too high) and 0 − 2 on the
+literature set. Asp/Glu gain on SNase (17 − 5), CYS on the fitting rows
+(11 − 4) and LYS is neutral to positive. At pH 6 the default (neutral His)
+is wrong for most His, and `--ph` recovers 121 of them on the fitting rows.
+
+These counts replace the earlier pH 7 table (728 → 746 of 841 sites), which
+was produced by a one-off join that cannot be reproduced; the net gain there
+(+18) is within the interval above. The states applied by `run --ph 7` agree
+with the `pka` report's recommended states at every one of 659 compared
+sites.
+
+**His corrections tried (none adopted).** v1.4 His predictions are nearly
+unbiased on the fitting rows (mean signed error −0.11, MAE 0.79). Their
+residual grows with the hydrogen-bond term (no H-bond −0.31, H-bond ≥ 1
++0.93) and the electrostatic term (r = +0.32). Four post-hoc corrections of
+the His prediction were fitted on the fitting rows only, scored by
+leave-one-cluster-out CV and compared with the v1.4 His MAE of 0.787:
+
+| Correction | LOCO MAE | pH 7 net (v1.4 +3) | Other pH |
+|---|---|---|---|
+| Scale the H-bond term | 0.798 | +3 | pH 8: −4 (v1.4 −1) |
+| Scale the electrostatic term | 0.805 | +5 | pH 6: +83 (v1.4 +92) |
+| Raise model pKa and scale both terms | 0.781 | +6 | pH 6: +81, pH 8: −3 |
+| HIP only at pKa ≥ pH + m (in-sample) | — | +11 at m = 0.25 | pH 6: +81, pH 6.5: +26 (v1.4 +29) |
+
+None is better than v1.4 over the pH range. The margin's pH 7 gain comes
+mostly from repeated measurements of RNase A His105/His119 (7RSA), which are
+predicted 7.0–7.1. The His losses near pH 7 are the spread of an unbiased
+predictor with an MAE of about 0.8 around a threshold where many His pKa lie;
+no simple correction removes them. SNase and the literature set were not used
+to choose any of these.
+
+**H-bond geometry for ambiguous His (not adopted).** Ring N partners within
+3.3 Å, at most 50° from the C–N direction, were classified as acceptor
+(carboxylate, backbone O, Asn/Gln O), donor (Lys, Arg, backbone N, Asn/Gln N,
+Trp) or either (hydroxyl, water, His). When the predicted pKa is within a
+band b of the pH, the rule makes His HIP only when both N have acceptors
+(three acceptor definitions). It either decides the state, vetoes a HIP call
+or promotes a neutral call. Summed over pH 6–8 on the fitting rows, the pKa
+rule alone gives +122. The best geometry rule gives +121 (it never applies)
+and the vetoes give +80 at most. Only 2 of 190 His have acceptor-only
+partners on both N, and exposed His are protonated without any specific
+acceptor, so a veto removes correct HIP calls at pH 6–6.5.
+
+**Per-determinant corrections (not adopted).** With `pka --determinants`
+(empirical spec r9), His residuals on the fitting rows depend on the
+partners:
+
+| Partner | His sites with it | Mean residual with / without |
 |---|---|---|
-| Fitting rows, HIS/ASP/GLU/LYS/CYS (841) | 728 | 746 |
-| Literature set 2026-11 (38) | 38 | 36 |
+| Asp/Glu side-chain H-bond | 37 | +0.47 / −0.25 |
+| His–His Coulomb | 31 | −0.57 / −0.02 |
+| Backbone C=O | 49 | +0.05 / −0.17 |
 
-The gate study above used v1.3 predictions (the engine of the time). For
-comparison, the same fitting-row count is 752 under v1.3 and 753 under
-v1.3 + Q9 (see the empirical engine specification, r8). The fitting-row gain is in-sample for
-CYS, TYR and HIS (their parameters were fitted on these rows). The
-literature set is mostly His with pKa below 7, so the default is always
-right there and only losses can show: LCC-ICCG His242 in two structures.
-The states applied by `run --ph 7` agree with the `pka` report's
-recommended states at every one of 659 compared sites.
+SNase His121 and His124 are over-predicted by the same Glu H-bond and
+Coulomb pair. Scaling these partners' contributions, under leave-one-cluster-out
+CV on the fitting rows (v1.4 MAE 0.787), gives:
 
-Open: anti carboxylic acid conformers; ensemble or microstate treatment of
-coupled sites (Phase 5); the acid–base pair threshold (Q9 candidate).
+| Scaled contribution | LOCO MAE | pH 6–8 state net |
+|---|---|---|
+| His–carboxylate H-bond only | 0.794 | unchanged to −2 |
+| His–carboxylate H-bond and Coulomb | 0.814 | unchanged to −3 |
+| His–His Coulomb (best: removed) | 0.770 | +1 to +3 against v1.4 |
+
+Only the His–His Coulomb change improves the CV MAE, and it does not improve
+the states. SNase MAE gets worse with it (0.838 → 0.884). His–His
+interactions are where the mean-field pair treatment is weakest, so they
+belong to coupled microstates (Phase 5).
+
+**Coupled microstates (Q10, empirical spec r10; not adopted).** Exact
+microstates for the pair components change His MAE from 0.787 to 0.784 and no
+state at pH 6–8, so the near-threshold His losses do not come from the
+mean-field pair treatment either.
+
+Open: a His model that resolves the near-threshold cases needs information
+the PROPKA-type terms do not carry (for example a learned or physics-based
+model, or more measured His pKa near 7); anti carboxylic acid conformers.
 
 ### Phase 5 — microstates and new chemistries (not started)
 
