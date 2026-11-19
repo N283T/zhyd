@@ -40,6 +40,16 @@ outside PKAD-R and the external set, including upper bounds ("pKa < 3.5").
 protonation-state agreement per report directory; see
 [eval/README.md](eval/README.md).
 
+`score_states.py` checks the states `run --ph` applies: per site kind, how
+often the default states and the pKa-derived states match experiment at each
+`--ph`, how many changed sites are right or wrong, and a bootstrap interval
+for the net gain (`--rows fit|holdout|all`, `--group` for the bootstrap unit):
+
+```sh
+python3 scripts/pka/score_states.py merged.csv reports/ --rows holdout \
+    --group pdb_id --ph 6 --ph 7 --ph 8 --verbose
+```
+
 ## Experimental evaluation (PKAD-R)
 
 Do not commit redistributed PKAD-R data. Download the standalone JSON file
