@@ -448,6 +448,24 @@ microstates for the pair components change His MAE from 0.787 to 0.784 and no
 state at pH 6–8, so the near-threshold His losses do not come from the
 mean-field pair treatment either.
 
+**His against PROPKA 3 and the null model.** The same 190 His on the fitting
+rows, scored for PROPKA 3 (the empirical engine's `parity` mode, which
+reproduces it), v1.4 and the null model (every His at its model pKa, 6.5):
+
+| His, fitting rows (190) | MAE | pH 7 state agreement | Experimental pKa 6–8 (125) |
+|---|---|---|---|
+| Null model (6.5) | 0.80 | 72% | 70% |
+| PROPKA 3 (parity) | 0.92 | 76% | 74% |
+| zhyd v1.4 | 0.79 | 74% | 70% |
+
+PROPKA 3 is further from experiment than the null model on His, and v1.4
+matches it. Most His pKa lie between 6 and 7, so the null model is already
+close and structure terms add little. Over all kinds v1.4 does improve on
+both (MAE 0.76 against PROPKA 3 0.97 and null 0.85). On the 19 SNase His all
+three agree with the pH 7 state at 89% or more. The `--ph` His states are
+therefore at the level of the usual PROPKA-based assignment (as in PDB2PQR),
+not below it.
+
 Open: a His model that resolves the near-threshold cases needs information
 the PROPKA-type terms do not carry (for example a learned or physics-based
 model, or more measured His pKa near 7); anti carboxylic acid conformers.
