@@ -103,6 +103,7 @@ Common `run` and `batch` options:
 | `--state-json PATH` | Applied residue state/formal-charge sidecar (`run` only) |
 | `--protonation PATH` | Residue protonation override file |
 | `--ph VALUE` | Protonation states from predicted pKa at this pH (experimental; overrides win) |
+| `--empirical-mode MODE` | pKa model for `--ph`: `zhyd` (default) or `parity` (PROPKA 3 model) |
 | `--fix PATH` | Force mover states from a control file |
 | `--no-opt` | Skip optimization |
 | `--no-flip` | Disable Asn/Gln/His flips |
@@ -166,9 +167,11 @@ Applied state reports and experimental pKa reports use the versioned
 pKa at that pH: HIS → HIP, ASP/GLU → protonated, LYS → neutral and CYS →
 thiolate when the predicted pKa crosses the pH (TYR, ARG and termini keep
 their defaults). The optimizer still picks tautomers, ring flips and the
-protonated carboxyl oxygen; `--protonation` entries win. It is experimental:
-see [Phase 4](docs/specs/zhyd-protonation-pka.md) for the rule and its
-evaluation.
+protonated carboxyl oxygen; `--protonation` entries win. `--empirical-mode
+parity` takes the pKa from the PROPKA 3 model instead of the recalibrated
+zhyd mode; `--state-json` records which in `parameter_version`. It is
+experimental: see [Phase 4](docs/specs/zhyd-protonation-pka.md) for the rule
+and its evaluation.
 
 With `-Dpropka=true`, `pka` uses PROPKA 3.5.1 by default (`--engine propka`).
 Its values match `propka3` run on the same structure to the two decimals

@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `run --ph` and `batch --ph` take `--empirical-mode parity` to choose
+  protonation states from the PROPKA 3 model instead of the recalibrated
+  zhyd mode (the default). The applied state report (`--state-json`) now
+  records the pKa parameter version behind the states in
+  `parameter_version` (null without `--ph`)
 - `zhyd pka --determinants` (empirical engine): each site's report lists its
   per-partner side-chain, backbone and Coulomb contributions (partner
   residue, group type, term, value), as PROPKA's determinants do. They add up

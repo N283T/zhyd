@@ -23,6 +23,7 @@ const RunConfig = struct {
     nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
     ph: ?f32 = null,
+    ph_mode: ?zhyd.pka_empirical.Mode = null,
     fix_path: ?[]const u8 = null,
     dump_movers_path: ?[]const u8 = null,
     strip_h: bool = false,
@@ -59,6 +60,7 @@ const CommonOptions = struct {
     nterm_mode: zhyd.place.NtermMode = .auto,
     protonation_path: ?[]const u8 = null,
     ph: ?f32 = null,
+    ph_mode: ?zhyd.pka_empirical.Mode = null,
     fix_path: ?[]const u8 = null,
     sdf_path: ?[]const u8 = null,
     strip_h: bool = false,
@@ -195,6 +197,17 @@ fn parseCommonOption(args: []const []const u8, i: *usize, common: *CommonOptions
         }
         common.ph = value;
         return true;
+    } else if (std.mem.eql(u8, arg, "--empirical-mode")) {
+        i.* += 1;
+        if (i.* >= args.len) {
+            std.debug.print("Error: --empirical-mode requires 'parity' or 'zhyd'\n", .{});
+            std.process.exit(1);
+        }
+        common.ph_mode = std.meta.stringToEnum(zhyd.pka_empirical.Mode, args[i.*]) orelse {
+            std.debug.print("Error: unknown --empirical-mode '{s}' (use 'parity' or 'zhyd')\n", .{args[i.*]});
+            std.process.exit(1);
+        };
+        return true;
     } else if (std.mem.eql(u8, arg, "--fix")) {
         i.* += 1;
         if (i.* >= args.len) {
@@ -314,6 +327,13 @@ fn parseRunArgs(args: []const []const u8) ?RunConfig {
     config.nterm_mode = common.nterm_mode;
     config.protonation_path = common.protonation_path;
     config.ph = common.ph;
+    if (common.ph_mode) |mode| {
+        if (common.ph == null) {
+            std.debug.print("Error: --empirical-mode needs --ph\n", .{});
+            std.process.exit(1);
+        }
+        config.ph_mode = mode;
+    }
     config.fix_path = common.fix_path;
     config.sdf_path = common.sdf_path;
     config.strip_h = common.strip_h;
@@ -524,6 +544,8 @@ fn printRunUsage() void {
         \\    --protonation PATH  Residue protonation override file
         \\    --ph VALUE         Protonation states from predicted pKa at this pH
         \\                       (HIS/ASP/GLU/LYS/CYS; experimental; overrides win)
+        \\    --empirical-mode MODE  pKa model for --ph: 'zhyd' (default; recalibrated)
+        \\                       or 'parity' (PROPKA 3 model)
         \\    --fix PATH         Force mover states from control file
         \\    --dump-movers PATH  Write available mover IDs/states to file
         \\    --no-opt           Skip optimization
@@ -663,6 +685,13 @@ fn parseBatchArgs(args: []const []const u8) ?zhyd.batch.BatchConfig {
     config.nterm_mode = common.nterm_mode;
     config.protonation_path = common.protonation_path;
     config.ph = common.ph;
+    if (common.ph_mode) |mode| {
+        if (common.ph == null) {
+            std.debug.print("Error: --empirical-mode needs --ph\n", .{});
+            std.process.exit(1);
+        }
+        config.ph_mode = mode;
+    }
     config.fix_path = common.fix_path;
     config.sdf_path = common.sdf_path;
     config.strip_h = common.strip_h;
@@ -686,6 +715,8 @@ fn printBatchUsage() void {
         \\    --protonation PATH  Residue protonation override file
         \\    --ph VALUE         Protonation states from predicted pKa at this pH
         \\                       (HIS/ASP/GLU/LYS/CYS; experimental; overrides win)
+        \\    --empirical-mode MODE  pKa model for --ph: 'zhyd' (default; recalibrated)
+        \\                       or 'parity' (PROPKA 3 model)
         \\    --fix PATH         Force mover states from control file
         \\    --no-opt           Skip optimization
         \\    --no-flip          Disable flips
@@ -878,6 +909,7 @@ fn runSubcommand(allocator: Allocator, args: []const []const u8) void {
         .nterm_mode = config.nterm_mode,
         .protonation_path = config.protonation_path,
         .ph = config.ph,
+        .ph_mode = config.ph_mode orelse .zhyd,
         .fix_path = config.fix_path,
         .dump_movers_path = config.dump_movers_path,
         .strip_h = config.strip_h,

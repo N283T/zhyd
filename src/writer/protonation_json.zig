@@ -26,6 +26,9 @@ pub fn writeStateReport(
     writer: anytype,
     input: []const u8,
     coordinate_file: ?[]const u8,
+    /// pKa parameter version that chose the states (`run --ph`); null when
+    /// no pKa was used.
+    parameter_version: ?[]const u8,
     models: []const StateReportModel,
     overrides: ?*const protonation.ProtonationOverrides,
     nterm_mode: terminal.NtermMode,
@@ -40,7 +43,13 @@ pub fn writeStateReport(
         try writeJsonString(writer, path);
         try writer.writeAll("\"");
     } else try writer.writeAll("null");
-    try writer.writeAll(",\n  \"parameter_version\": null,\n  \"models\": [\n");
+    try writer.writeAll(",\n  \"parameter_version\": ");
+    if (parameter_version) |version| {
+        try writer.writeAll("\"");
+        try writeJsonString(writer, version);
+        try writer.writeAll("\"");
+    } else try writer.writeAll("null");
+    try writer.writeAll(",\n  \"models\": [\n");
     for (models, 0..) |entry, model_i| {
         try writer.print("    {{\"model\": {d}, \"sites\": [\n", .{entry.model_num});
         const metals = try pka.metalPositions(entry.model.allocator, entry.model);
@@ -442,10 +451,11 @@ test "applied state report records geometry-selected histidine tautomer" {
     const reports = [_]StateReportModel{.{ .model_num = 1, .model = &mdl }};
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
-    try writeStateReport(&out.writer, "his.cif", "his-out.cif", &reports, null, .auto);
+    try writeStateReport(&out.writer, "his.cif", "his-out.cif", null, &reports, null, .auto);
     const json = out.writer.buffered();
     try testing.expect(std.mem.find(u8, json, "\"tautomer\": \"HID\"") != null);
     try testing.expect(std.mem.find(u8, json, "\"source\": \"geometry_selected\"") != null);
+    try testing.expect(std.mem.find(u8, json, "\"parameter_version\": null") != null);
 }
 
 test "applied state report marks disulfide cysteines as covalently bonded" {
@@ -455,7 +465,7 @@ test "applied state report marks disulfide cysteines as covalently bonded" {
     const reports = [_]StateReportModel{.{ .model_num = 1, .model = &mdl }};
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
-    try writeStateReport(&out.writer, "disulfide.cif", null, &reports, null, .auto);
+    try writeStateReport(&out.writer, "disulfide.cif", null, null, &reports, null, .auto);
     const json = out.writer.buffered();
     try testing.expectEqual(@as(usize, 2), std.mem.count(u8, json, "\"macrostate\": \"disulfide_bonded\""));
     try testing.expect(std.mem.find(u8, json, "\"protonated_neutral\"") == null);

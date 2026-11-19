@@ -436,6 +436,10 @@ test "real-file pka: 2cf8 PROPKA engine matches PROPKA 3.5.1" {
 
 /// Run `processFile` on 1L2Y model 1 at `ph` and return the state report.
 fn runAtPh(allocator: std.mem.Allocator, tmp: *std.testing.TmpDir, ph: f32) ![]u8 {
+    return runAtPhWith(allocator, tmp, ph, .zhyd);
+}
+
+fn runAtPhWith(allocator: std.mem.Allocator, tmp: *std.testing.TmpDir, ph: f32, mode: zhyd.pka_empirical.Mode) ![]u8 {
     const io = std.testing.io;
     const dir = try tmp.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(dir);
@@ -452,6 +456,7 @@ fn runAtPh(allocator: std.mem.Allocator, tmp: *std.testing.TmpDir, ph: f32) ![]u
         .strip_h = true,
         .quiet = true,
         .ph = ph,
+        .ph_mode = mode,
     });
     return tmp.dir.readFileAlloc(io, "state.json", allocator, .limited(1 << 20));
 }
@@ -472,4 +477,19 @@ test "real-file ph: 1L2Y states follow the pH and record their source" {
     defer testing.allocator.free(base);
     try testing.expect(std.mem.find(u8, base, "\"site\": \"LYS\"}, \"state\": {\"macrostate\": \"neutral\"") != null);
     try testing.expect(std.mem.find(u8, base, "\"site\": \"ASP\"}, \"state\": {\"macrostate\": \"deprotonated_anion\"") != null);
+}
+
+test "real-file ph: the state report records the pKa model behind --ph" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const recalibrated = try runAtPhWith(testing.allocator, &tmp, 7.0, .zhyd);
+    defer testing.allocator.free(recalibrated);
+    try testing.expect(std.mem.find(u8, recalibrated, "\"parameter_version\": \"zhyd-empirical-v1.4\"") != null);
+
+    // At pH 0 the parity model also protonates Asp9.
+    const parity = try runAtPhWith(testing.allocator, &tmp, 0.0, .parity);
+    defer testing.allocator.free(parity);
+    try testing.expect(std.mem.find(u8, parity, "\"parameter_version\": \"zhyd-empirical-v1-parity\"") != null);
+    try testing.expect(std.mem.find(u8, parity, "\"site\": \"ASP\"}, \"state\": {\"macrostate\": \"protonated_neutral\"") != null);
 }
