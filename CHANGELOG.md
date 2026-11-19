@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   per-partner side-chain, backbone and Coulomb contributions (partner
   residue, group type, term, value), as PROPKA's determinants do. They add up
   to the `hydrogen_bond` and `electrostatic` terms; other values are unchanged
+- `scripts/pka/score_states.py`: per-kind agreement of the default and the
+  `run --ph` states with experiment, changed sites right/wrong and a
+  bootstrap interval for the net gain. Phase 4 in the protonation spec now
+  reports it on the fitting rows, the SNase stress set and the literature set
 
 ## [0.4.0] - 2026-11-13
 
