@@ -452,7 +452,11 @@ Open: a His model that resolves the near-threshold cases needs information
 the PROPKA-type terms do not carry (for example a learned or physics-based
 model, or more measured His pKa near 7); anti carboxylic acid conformers.
 
-### Phase 5 — microstates and new chemistries (not started)
+### Phase 5 — microstates and new chemistries (started)
+
+Exact coupled microstates for the empirical engine's pair components are
+implemented as Q10 (empirical spec r10). They are opt-in and not adopted: on
+the evaluation sets they change MAE by under 0.01 and the states not at all.
 
 - Exact/sampled coupled microstates with normalized probabilities and ensemble
   provenance; then ligand, nucleic-acid, and metal-aware providers under separate

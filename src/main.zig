@@ -392,7 +392,7 @@ fn parsePkaArgs(args: []const []const u8) ?PkaConfig {
                 std.process.exit(1);
             }
             config.empirical_fixes = zhyd.pka_empirical.Fixes.parse(args[i]) catch {
-                std.debug.print("Error: invalid --empirical-fixes '{s}' (comma-separated Q1..Q9, or 'none')\n", .{args[i]});
+                std.debug.print("Error: invalid --empirical-fixes '{s}' (comma-separated Q1..Q10, or 'none')\n", .{args[i]});
                 std.process.exit(1);
             };
         } else if (std.mem.eql(u8, arg, "--parameters")) {
@@ -488,7 +488,7 @@ fn printPkaUsage() void {
         \\                       and recalibrated parameters) or 'parity' (PROPKA 3
         \\                       model, quirks included)
         \\    --empirical-fixes LIST  Override the empirical corrections: comma-separated
-        \\                       Q1..Q9 (e.g. 'Q2,Q7') or 'none' (ablation)
+        \\                       Q1..Q10 (e.g. 'Q2,Q7') or 'none' (ablation)
         \\    --determinants     Empirical engine: add each site's per-partner side-chain,
         \\                       backbone and Coulomb contributions to the report
         \\    --propka-keep-waters  Pass crystal waters to PROPKA (exact PROPKA-on-file

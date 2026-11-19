@@ -38,10 +38,13 @@ pub const Fixes = packed struct(u16) {
     /// Acid–base pairs of the iterative scheme: the ion-pair interaction is
     /// weighted by a logistic in k₂ − k₁ instead of switched on at k₁ = k₂.
     q9: bool = false,
-    _pad: u7 = 0,
+    /// Side-chain pairs of the iterative scheme: coupled microstates of each
+    /// connected component instead of iterated pair assignments.
+    q10: bool = false,
+    _pad: u6 = 0,
 
     pub const none: Fixes = .{};
-    pub const names = [_][]const u8{ "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9" };
+    pub const names = [_][]const u8{ "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9", "Q10" };
 
     pub fn bits(self: Fixes) u16 {
         return @bitCast(self);
@@ -498,7 +501,7 @@ test "correction sets parse and name their version" {
     try testing.expect(f.q2 and f.q7 and !f.q1);
     try testing.expectEqual(@as(u16, 0b0100_0010), f.bits());
     try testing.expect((try Fixes.parse("none")).isNone());
-    try testing.expectError(error.InvalidFix, Fixes.parse("Q10"));
+    try testing.expectError(error.InvalidFix, Fixes.parse("Q11"));
     try testing.expectError(error.InvalidFix, Fixes.parse(""));
     try testing.expectEqualStrings("zhyd-empirical-v1+Q2+Q7", versionFor(f, .{ .q1 = true }, false));
     try testing.expectEqualStrings(zhyd_v1_version, versionFor(v1_fixes, f, false));

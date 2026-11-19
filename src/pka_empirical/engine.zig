@@ -8,6 +8,7 @@ const sites = @import("sites.zig");
 const desolvation = @import("desolvation.zig");
 const interactions = @import("interactions.zig");
 const iterative = @import("iterative.zig");
+const microstates = @import("microstates.zig");
 
 const Parameters = params_mod.Parameters;
 const Group = sites.Group;
@@ -107,7 +108,9 @@ pub fn evaluate(allocator: std.mem.Allocator, conf: *sites.Conformation, params:
             }
         }
     }
-    try iterative.solve(allocator, groups, pairs.items, params);
+    if (params.fixes.q10) {
+        _ = try microstates.solve(allocator, groups, pairs.items, params);
+    } else try iterative.solve(allocator, groups, pairs.items, params);
     if (recorder != null) {
         // The same threshold as `iterative.solve` uses when it adds them.
         for (pairs.items) |pair| {
@@ -176,6 +179,7 @@ pub const SiteSum = struct {
     burial: f64 = 0,
     hydrogen_bond: f64 = 0,
     electrostatic: f64 = 0,
+    coupling: f64 = 0,
     weight: f64 = 0,
     center: sites.Vec = .{ .x = 0, .y = 0, .z = 0 },
     /// Conformation-mean determinants, `Result.determinants[det_start..][0..det_len]`
@@ -347,6 +351,7 @@ pub fn addConformation(entry: *SiteSum, g: Group, first_conformation: bool, para
     entry.burial += g.desolvation + g.reorganisation;
     entry.hydrogen_bond += g.side_chain + g.backbone;
     entry.electrostatic += g.coulomb;
+    entry.coupling += g.coupling;
     entry.weight += g.weight;
     entry.center = entry.center.add(g.center);
 }
@@ -364,6 +369,7 @@ pub fn mean(sum: SiteSum, n_conf: u32, params: Parameters) SiteSum {
     s.burial *= inv;
     s.hydrogen_bond *= inv;
     s.electrostatic *= inv;
+    s.coupling *= inv;
     s.weight *= inv;
     if (s.n_titrating > 0) s.center = s.center.scale(1.0 / @as(f64, @floatFromInt(s.n_titrating)));
     return s;
