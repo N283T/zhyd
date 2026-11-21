@@ -57,6 +57,11 @@ pub fn derivePlans(
         const heavy_idx = findBondedHeavyAtom(component, @intCast(atom_idx)) orelse continue;
         const heavy_atom = component.atoms[heavy_idx];
 
+        // Carboxylic and sulfonic/sulfuric acids are deprotonated at
+        // physiological pH (as Asp/Glu and C-terminal carboxyls are); the CCD
+        // defines them neutral, so their acidic H is not placed.
+        if (acidCenter(component, heavy_idx) != null) continue;
+
         // Skip leaving H atoms whose parent heavy atom is absent from the model
         // or involved in an inter-residue bond. The leaving_atom_flag marks atoms
         // that *may* leave during polymerization (e.g. H2 on backbone N for peptide
@@ -115,6 +120,164 @@ fn findBondedHeavyAtom(component: *const ccd.Component, h_idx: u16) ?u16 {
         }
     }
     return null;
+}
+
+/// The other atom of `bond` when it involves `atom_idx`, else null.
+fn neighborOf(bond: ccd.CompBond, atom_idx: u16) ?u16 {
+    if (bond.atom_idx_1 == atom_idx) return bond.atom_idx_2;
+    if (bond.atom_idx_2 == atom_idx) return bond.atom_idx_1;
+    return null;
+}
+
+fn isElement(atom: ccd.CompAtom, comptime sym: []const u8) bool {
+    const want: [2]u8 = if (sym.len == 1) .{ sym[0], ' ' } else .{ sym[0], sym[1] };
+    return atom.element_symbol[0] == want[0] and atom.element_symbol[1] == want[1];
+}
+
+/// Heavy-atom degree of a CCD atom.
+fn heavyDegree(component: *const ccd.Component, atom_idx: u16) u8 {
+    var deg: u8 = 0;
+    for (component.bonds) |bond| {
+        const ni = neighborOf(bond, atom_idx) orelse continue;
+        if (component.atoms[ni].element_symbol[0] != 'H') deg += 1;
+    }
+    return deg;
+}
+
+/// Terminal oxygens (bonded to nothing heavy but the center) on an acid
+/// center, split by bond order.
+const AcidOxygens = struct { single: u8 = 0, double: u8 = 0 };
+
+fn countTerminalOxygens(component: *const ccd.Component, center_idx: u16) AcidOxygens {
+    var out = AcidOxygens{};
+    for (component.bonds) |bond| {
+        const ni = neighborOf(bond, center_idx) orelse continue;
+        if (!isElement(component.atoms[ni], "O") or heavyDegree(component, ni) != 1) continue;
+        switch (bond.order) {
+            .single => out.single += 1,
+            .double => out.double += 1,
+            else => {},
+        }
+    }
+    return out;
+}
+
+/// If `o_idx` is a terminal, singly bonded oxygen of a carboxylic acid
+/// (C with another =O) or a sulfonic/sulfuric acid (S with two or more =O),
+/// return the index of the acid center. Phosphates are left alone: their
+/// second pKa is close to 7.
+fn acidCenter(component: *const ccd.Component, o_idx: u16) ?u16 {
+    if (!isElement(component.atoms[o_idx], "O")) return null;
+    if (heavyDegree(component, o_idx) != 1) return null;
+    for (component.bonds) |bond| {
+        const ci = neighborOf(bond, o_idx) orelse continue;
+        const center = component.atoms[ci];
+        if (center.element_symbol[0] == 'H') continue;
+        if (bond.order != .single) return null;
+        const oxy = countTerminalOxygens(component, ci);
+        if (isElement(center, "C") and oxy.double >= 1) return ci;
+        if (isElement(center, "S") and oxy.double >= 2) return ci;
+        return null;
+    }
+    return null;
+}
+
+/// Acid center that a terminal oxygen (single or double bonded) belongs to.
+fn acidGroupCenter(component: *const ccd.Component, o_idx: u16) ?u16 {
+    if (!isElement(component.atoms[o_idx], "O")) return null;
+    if (heavyDegree(component, o_idx) != 1) return null;
+    for (component.bonds) |bond| {
+        const ci = neighborOf(bond, o_idx) orelse continue;
+        if (component.atoms[ci].element_symbol[0] == 'H') continue;
+        // The center is an acid when one of its singly bonded oxygens is.
+        for (component.bonds) |cb| {
+            const oi = neighborOf(cb, ci) orelse continue;
+            if (cb.order == .single and acidCenter(component, oi) != null) return ci;
+        }
+        return null;
+    }
+    return null;
+}
+
+fn indexOfName(component: *const ccd.Component, name: [4]u8) ?u16 {
+    for (component.atoms, 0..) |atom, i| {
+        if (std.mem.eql(u8, &atom.name, &name)) return @intCast(i);
+    }
+    return null;
+}
+
+/// H-bond flags for a heavy atom of a CCD-described residue, beyond the
+/// element defaults, or null when the defaults apply.
+/// - Oxygens of a deprotonated acid group (all its terminal O present, none
+///   carrying an H in the model) or with a -1 CCD charge: negative acceptor.
+/// - Nitrogens with an available lone pair (pyridine/imine, nitrile, or a
+///   non-conjugated tertiary amine): acceptor.
+pub fn heavyAtomFlags(
+    component: *const ccd.Component,
+    atom_name: [4]u8,
+    existing_atom_names: []const [4]u8,
+) ?element_mod.AtomFlags {
+    const idx = indexOfName(component, atom_name) orelse return null;
+    const atom = component.atoms[idx];
+    if (isElement(atom, "O")) {
+        if (atom.charge < 0) return .{ .acceptor = true, .negative = true };
+        const ci = acidGroupCenter(component, idx) orelse return null;
+        if (!acidGroupIsCharged(component, ci, existing_atom_names)) return null;
+        return .{ .acceptor = true, .negative = true };
+    }
+    if (isElement(atom, "N") and isLonePairNitrogen(component, idx)) return .{ .acceptor = true };
+    return null;
+}
+
+/// An acid group is charged in the model when every terminal oxygen is
+/// present and none of them has an H in the model.
+fn acidGroupIsCharged(component: *const ccd.Component, center_idx: u16, existing_atom_names: []const [4]u8) bool {
+    for (component.bonds) |bond| {
+        const oi = neighborOf(bond, center_idx) orelse continue;
+        if (!isElement(component.atoms[oi], "O") or heavyDegree(component, oi) != 1) continue;
+        if (!nameExists(component.atoms[oi].name, existing_atom_names)) return false;
+        for (component.bonds) |ob| {
+            const hi = neighborOf(ob, oi) orelse continue;
+            const h = component.atoms[hi];
+            if (h.element_symbol[0] == 'H' and nameExists(h.name, existing_atom_names)) return false;
+        }
+    }
+    return true;
+}
+
+/// Neutral N without H whose lone pair is free to accept an H-bond:
+/// a two-coordinate N with a double or aromatic bond (pyridine, imidazole N3,
+/// imine), a nitrile N, or a tertiary amine not conjugated with a pi system.
+fn isLonePairNitrogen(component: *const ccd.Component, idx: u16) bool {
+    const atom = component.atoms[idx];
+    if (atom.charge != 0) return false;
+    var valence: u8 = 0;
+    var degree: u8 = 0;
+    var has_pi = false;
+    var has_triple = false;
+    var has_arom = false;
+    for (component.bonds) |bond| {
+        const ni = neighborOf(bond, idx) orelse continue;
+        if (component.atoms[ni].element_symbol[0] == 'H') return false;
+        degree += 1;
+        valence += bondValence(bond.order);
+        switch (bond.order) {
+            .double => has_pi = true,
+            .aromatic, .delocalized => {
+                has_pi = true;
+                has_arom = true;
+            },
+            .triple => has_triple = true,
+            else => {},
+        }
+    }
+    // Aromatic bonds count 1 in bondValence, so a two-coordinate aromatic N
+    // sums to 2.
+    if (valence != 3 and !(has_arom and degree == 2)) return false;
+    if (degree == 1) return has_triple;
+    if (degree == 2) return has_pi;
+    if (degree == 3) return !has_pi and !isConjugatedNitrogen(component, idx, valence);
+    return false;
 }
 
 /// Maximum valence for common elements; returns 0 for unknown/metals (skip check).
@@ -865,4 +1028,67 @@ test "dihedrals from ideal coordinates reproduce the ideal H positions" {
         const placed = geometry.placeH3XR(x, pos.of(comp, plan.connected[1]), pos.of(comp, plan.connected[2]), h_ideal.distance(x), plan.angle, plan.dihedral);
         try testing.expect(placed.distance(h_ideal) < 1e-3);
     }
+}
+
+fn acetateComponent(atoms: []ccd.CompAtom, bonds: []ccd.CompBond) ccd.Component {
+    return .{ .comp_id = "ACY", .comp_type = "non-polymer", .atoms = atoms, .bonds = bonds };
+}
+
+test "derivePlans does not protonate carboxylic acids; both O are charged acceptors" {
+    // CH3-C(=O)-OH
+    var atoms = [_]ccd.CompAtom{
+        compAtom("C", 'C'),   compAtom("O", 'O'),  compAtom("OXT", 'O'), compAtom("CH3", 'C'),
+        compAtom("HXT", 'H'), compAtom("H1", 'H'), compAtom("H2", 'H'),  compAtom("H3", 'H'),
+    };
+    var bonds = [_]ccd.CompBond{
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 1, .order = .double },
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 2, .order = .single },
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 3, .order = .single },
+        .{ .atom_idx_1 = 2, .atom_idx_2 = 4, .order = .single },
+        .{ .atom_idx_1 = 3, .atom_idx_2 = 5, .order = .single },
+        .{ .atom_idx_1 = 3, .atom_idx_2 = 6, .order = .single },
+        .{ .atom_idx_1 = 3, .atom_idx_2 = 7, .order = .single },
+    };
+    const comp = acetateComponent(&atoms, &bonds);
+    const existing = [_][4]u8{ atoms[0].name, atoms[1].name, atoms[2].name, atoms[3].name };
+    const plans = try derivePlans(testing.allocator, &comp, &existing, &.{});
+    defer testing.allocator.free(plans);
+    try testing.expectEqual(@as(usize, 3), plans.len); // methyl H only
+    for (plans) |p| try testing.expect(!std.mem.eql(u8, &p.h_name, &atoms[4].name));
+
+    for ([_]usize{ 1, 2 }) |oi| {
+        const f = heavyAtomFlags(&comp, atoms[oi].name, &existing).?;
+        try testing.expect(f.negative and f.acceptor);
+    }
+    // An input that already carries HXT keeps the neutral acid.
+    const with_h = [_][4]u8{ atoms[0].name, atoms[1].name, atoms[2].name, atoms[3].name, atoms[4].name };
+    try testing.expect(heavyAtomFlags(&comp, atoms[1].name, &with_h) == null);
+}
+
+test "heavyAtomFlags marks lone-pair N acceptors only" {
+    // Pyridine-like C1=N-C2, amide N(-H)-C(=O), tertiary amine N(C)3.
+    var atoms = [_]ccd.CompAtom{
+        compAtom("C1", 'C'), compAtom("NP", 'N'), compAtom("C2", 'C'), // 0-2 imine
+        compAtom("NA", 'N'), compAtom("CA", 'C'), compAtom("OA", 'O'), compAtom("HNA", 'H'), // 3-6 amide
+        compAtom("NT", 'N'), compAtom("CT1", 'C'), compAtom("CT2", 'C'), compAtom("CT3", 'C'), // 7-10 amine
+        compAtom("NN", 'N'), compAtom("CN", 'C'), // 11-12 nitrile
+    };
+    var bonds = [_]ccd.CompBond{
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 1, .order = .double },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 2, .order = .single },
+        .{ .atom_idx_1 = 3, .atom_idx_2 = 4, .order = .single },
+        .{ .atom_idx_1 = 4, .atom_idx_2 = 5, .order = .double },
+        .{ .atom_idx_1 = 3, .atom_idx_2 = 6, .order = .single },
+        .{ .atom_idx_1 = 2, .atom_idx_2 = 3, .order = .single },
+        .{ .atom_idx_1 = 7, .atom_idx_2 = 8, .order = .single },
+        .{ .atom_idx_1 = 7, .atom_idx_2 = 9, .order = .single },
+        .{ .atom_idx_1 = 7, .atom_idx_2 = 10, .order = .single },
+        .{ .atom_idx_1 = 11, .atom_idx_2 = 12, .order = .triple },
+    };
+    const comp = ccd.Component{ .comp_id = "TST", .comp_type = "non-polymer", .atoms = &atoms, .bonds = &bonds };
+    try testing.expect(heavyAtomFlags(&comp, atoms[1].name, &.{}).?.acceptor); // imine N
+    try testing.expect(heavyAtomFlags(&comp, atoms[3].name, &.{}) == null); // amide N-H
+    try testing.expect(heavyAtomFlags(&comp, atoms[7].name, &.{}).?.acceptor); // tertiary amine
+    try testing.expect(heavyAtomFlags(&comp, atoms[11].name, &.{}).?.acceptor); // nitrile
+    try testing.expect(heavyAtomFlags(&comp, atoms[5].name, &.{}) == null); // amide O: element default
 }

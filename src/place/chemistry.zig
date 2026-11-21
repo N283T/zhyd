@@ -1,4 +1,5 @@
-//! Residue/atom-specific chemical annotations for the 20 standard amino acids.
+//! Residue/atom-specific chemical annotations for the 20 standard amino acids
+//! and the 8 standard nucleotides.
 //!
 //! Atom names follow PDB convention (4-character, space-padded).
 //! Provides atom type and flag overrides beyond the generic element-based defaults.
@@ -178,6 +179,39 @@ const his_sc = [_]AnnotEntry{
     a("ND1 ", .Nacc, ARDA), // donor+acceptor: protonation-dependent
     a("NE2 ", .Nacc, ARDA), // donor+acceptor: protonation-dependent
 };
+
+// ---------------------------------------------------------------------------
+// Standard nucleotides (DA/DC/DG/DT, A/C/G/U)
+// ---------------------------------------------------------------------------
+
+// Backbone phosphate oxygens share the -1 charge.
+const nuc_phosphate = [_]AnnotEntry{
+    a("OP1", .O, NEG_A),
+    a("OP2", .O, NEG_A),
+};
+
+// Ring N with a free lone pair (no H in the neutral base).
+const adenine_n = [_]AnnotEntry{ a("N1", .Nacc, A), a("N3", .Nacc, A), a("N7", .Nacc, A) };
+const guanine_n = [_]AnnotEntry{ a("N3", .Nacc, A), a("N7", .Nacc, A) };
+const cytosine_n = [_]AnnotEntry{a("N3", .Nacc, A)};
+
+fn nucleobaseSlice(comp_id: []const u8) ?[]const AnnotEntry {
+    const map = std.StaticStringMap([]const AnnotEntry).initComptime(.{
+        .{ "DA", &adenine_n },       .{ "A", &adenine_n },
+        .{ "DG", &guanine_n },       .{ "G", &guanine_n },
+        .{ "DC", &cytosine_n },      .{ "C", &cytosine_n },
+        .{ "DT", &[_]AnnotEntry{} }, .{ "U", &[_]AnnotEntry{} },
+    });
+    return map.get(comp_id);
+}
+
+/// Annotation for an atom of a standard nucleotide, or null when the
+/// residue is not one or the atom has no specific annotation.
+pub fn getNucleotideAnnotation(comp_id: []const u8, atom_name: [4]u8) ?ChemAnnotation {
+    const base = nucleobaseSlice(comp_id) orelse return null;
+    if (lookupName(base, atom_name)) |ann| return ann;
+    return lookupName(&nuc_phosphate, atom_name);
+}
 
 // ---------------------------------------------------------------------------
 // Per-residue side-chain dispatch
@@ -446,4 +480,13 @@ test "internal residue atoms get no terminal annotation" {
 test "C-terminal N gets no annotation" {
     const ann = getTerminalAnnotation(n(" N  "), false, true);
     try std.testing.expect(ann == null);
+}
+
+test "nucleotide annotations mark ring N acceptors and charged phosphate" {
+    const n1 = getNucleotideAnnotation("DA", n("N1")).?;
+    try std.testing.expect(n1.flags.acceptor);
+    try std.testing.expect(getNucleotideAnnotation("DT", n("N3")) == null);
+    const op1 = getNucleotideAnnotation("G", n("OP1")).?;
+    try std.testing.expect(op1.flags.negative and op1.flags.acceptor);
+    try std.testing.expect(getNucleotideAnnotation("ALA", n("N1")) == null);
 }
