@@ -307,6 +307,15 @@ pub fn addHydrogensWithConfig(
                 const plans = try ccd_derive.derivePlans(mdl.allocator, &comp, existing, ir_atoms);
                 defer mdl.allocator.free(plans);
 
+                // Topology-aware H-bond flags (charged acid O, lone-pair N)
+                // on top of the element defaults set by applyChemistry.
+                for (mdl.atoms.items[res.atom_start..res.atom_end]) |*atom| {
+                    if (atom.is_hydrogen) continue;
+                    if (ccd_derive.heavyAtomFlags(&comp, atom.nameRaw(), existing)) |extra| {
+                        atom.flags = element.mergeFlags(atom.flags, extra);
+                    }
+                }
+
                 // For non-5'-terminal nucleotides, skip H on phosphate O (HOP2/HOP3).
                 // Phosphodiester bonds are implicit polymer bonds (not in struct_conn),
                 // so phosphate H should only be placed at the 5' terminus.
@@ -405,7 +414,9 @@ pub fn applyChemistryWithConfig(mdl: *Model, config: PlacementConfig) void {
             if (atom.is_hydrogen) continue;
 
             // Apply standard residue annotations (replace flags, but preserve bonded_inter_residue)
-            const has_std_ann = if (chemistry.getAnnotationWithOverride(comp_id, atom.nameRaw(), protonation_state)) |ann| blk: {
+            const has_std_ann = if (chemistry.getAnnotationWithOverride(comp_id, atom.nameRaw(), protonation_state) orelse
+                chemistry.getNucleotideAnnotation(comp_id, atom.nameRaw())) |ann|
+            blk: {
                 atom.element_type = ann.atom_type;
                 const keep_bonded = atom.flags.bonded_inter_residue;
                 atom.flags = ann.flags;

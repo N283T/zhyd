@@ -127,7 +127,7 @@ examples/
 - **MoverHint**: Stored on Atom from PlacementPlan. Drives mover generation.
 - **ParentMeta**: Inherits altloc/occupancy/b_factor from parent heavy atom to placed H.
 - **Bond topology**: `topology.zig` for standard AAs, CCD for non-standard, SDF or distance-based inference as fallback.
-- **Chemistry**: `chemistry.zig` for donor/acceptor/aromatic/charge annotations.
+- **Chemistry**: `chemistry.zig` for donor/acceptor/aromatic/charge annotations (20 AAs + 8 standard nucleotides). Other atoms get element defaults; CCD-described residues add charged acid O and lone-pair N acceptors (`ccd_derive.heavyAtomFlags`). Carboxylic/sulfonic acid H from the CCD is not placed (deprotonated).
 - **Terminal detection**: chain boundary + `is_chain_break_before` from `_pdbx_poly_seq_scheme`.
 - **Sentinel**: `ABSENT_H_POS = (1000,1000,1000)` for flipper absent H. Use `isAbsentH()`.
 
