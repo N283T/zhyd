@@ -1582,3 +1582,22 @@ test "SDF dict overrides distance-derive fallback" {
     // SDF path was used → distance_derived should be 0.
     try testing.expectEqual(@as(u32, 0), result.n_distance_derived);
 }
+
+test "applyChemistry gives ligand atoms element-default flags and radii" {
+    const source = @embedFile("../test_data/unknown_ligand.cif");
+    var mdl = try mmcif.parseModel(testing.allocator, source);
+    defer mdl.deinit();
+
+    applyChemistry(&mdl);
+
+    var found_o1 = false;
+    for (mdl.atoms.items) |atom| {
+        if (!std.mem.eql(u8, atom.nameSlice(), "O1")) continue;
+        found_o1 = true;
+        // Ligand O must be an H-bond acceptor with the explicit O radius,
+        // otherwise rotors never orient toward ligand acceptors.
+        try testing.expect(atom.flags.acceptor);
+        try testing.expectApproxEqAbs(element.AtomType.O.info().explicit_radius, atom.vdw_radius, 1e-6);
+    }
+    try testing.expect(found_o1);
+}
