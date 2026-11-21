@@ -412,7 +412,19 @@ pub fn applyChemistryWithConfig(mdl: *Model, config: PlacementConfig) void {
                 atom.flags.bonded_inter_residue = keep_bonded;
                 atom.vdw_radius = ann.atom_type.info().explicit_radius;
                 break :blk true;
-            } else false;
+            } else blk: {
+                // No residue-specific annotation (ligands, water, nucleic acids,
+                // unannotated amino acid atoms): fall back to the element-type
+                // defaults so that e.g. ligand and water oxygens are scored as
+                // acceptors. Parsed atoms otherwise keep empty flags and the
+                // generic 1.70 Å radius.
+                const info = atom.element_type.info();
+                const keep_bonded = atom.flags.bonded_inter_residue;
+                atom.flags = element.mergeFlags(atom.flags, info.flags);
+                atom.flags.bonded_inter_residue = keep_bonded;
+                if (atom.element_type != .unknown) atom.vdw_radius = info.explicit_radius;
+                break :blk false;
+            };
 
             // Apply terminal annotations (merge flags via OR)
             // Only set element_type/vdw_radius for atoms without standard annotation (e.g. OXT)

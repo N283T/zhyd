@@ -240,12 +240,43 @@ fn analyzeBonds(component: *const ccd.Component, atom_idx: u16, extra_bonds: u8,
             info.hybridization = .sp;
         } else if (info.has_double or info.has_aromatic) {
             info.hybridization = .sp2;
+        } else if (isConjugatedNitrogen(component, atom_idx, total_valence)) {
+            // Amide, urea, carbamate, enamine or aniline N: all single bonds,
+            // but the lone pair is delocalized into the adjacent pi system,
+            // so the N and its H are planar.
+            info.hybridization = .sp2;
         } else {
             info.hybridization = .sp3;
         }
     }
 
     return info;
+}
+
+/// True for a neutral trivalent N (all single bonds) bonded to a carbon that
+/// carries a double or aromatic bond to another atom, i.e. an N conjugated
+/// with C=O, C=N, C=C or an aromatic ring.
+fn isConjugatedNitrogen(component: *const ccd.Component, atom_idx: u16, total_valence: u8) bool {
+    const atom = component.atoms[atom_idx];
+    if (!(atom.element_symbol[0] == 'N' and atom.element_symbol[1] == ' ')) return false;
+    if (total_valence != 3) return false;
+    for (component.bonds) |bond| {
+        const neighbor_idx: u16 = if (bond.atom_idx_1 == atom_idx)
+            bond.atom_idx_2
+        else if (bond.atom_idx_2 == atom_idx)
+            bond.atom_idx_1
+        else
+            continue;
+        if (bond.order != .single) return false;
+        const neighbor = component.atoms[neighbor_idx];
+        if (!(neighbor.element_symbol[0] == 'C' and neighbor.element_symbol[1] == ' ')) continue;
+        for (component.bonds) |nb| {
+            if (nb.atom_idx_1 != neighbor_idx and nb.atom_idx_2 != neighbor_idx) continue;
+            if (nb.atom_idx_1 == atom_idx or nb.atom_idx_2 == atom_idx) continue;
+            if (nb.order == .double or nb.order == .aromatic or nb.order == .delocalized) return true;
+        }
+    }
+    return false;
 }
 
 /// Count the number of double bonds on an atom.
@@ -645,6 +676,63 @@ test "findBondedHeavyAtom returns correct index" {
     };
     const result = findBondedHeavyAtom(&comp, 1);
     try testing.expectEqual(@as(?u16, 0), result);
+}
+
+fn compAtom(comptime name: []const u8, elem: u8) ccd.CompAtom {
+    var n: [4]u8 = .{ ' ', ' ', ' ', ' ' };
+    @memcpy(n[0..name.len], name);
+    return .{ .name = n, .name_len = name.len, .element_symbol = .{ elem, ' ' } };
+}
+
+test "analyzeBonds treats amide/urea N as sp2" {
+    // Biotin-like ureido fragment: C5-N1(-HN1)-C3(=O3)
+    var atoms = [_]ccd.CompAtom{
+        compAtom("C5", 'C'), compAtom("N1", 'N'),  compAtom("C3", 'C'),
+        compAtom("O3", 'O'), compAtom("HN1", 'H'),
+    };
+    var bonds = [_]ccd.CompBond{
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 1, .order = .single },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 2, .order = .single },
+        .{ .atom_idx_1 = 2, .atom_idx_2 = 3, .order = .double },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 4, .order = .single },
+    };
+    const comp = ccd.Component{ .comp_id = "TST", .comp_type = "non-polymer", .atoms = &atoms, .bonds = &bonds };
+    try testing.expectEqual(Hybridization.sp2, analyzeBonds(&comp, 1, 0, 0).hybridization);
+
+    const existing = [_][4]u8{ atoms[0].name, atoms[1].name, atoms[2].name, atoms[3].name };
+    const plans = try derivePlans(testing.allocator, &comp, &existing, &.{});
+    defer testing.allocator.free(plans);
+    try testing.expectEqual(@as(usize, 1), plans.len);
+    try testing.expectEqual(PlacementType.hxr2_planar, plans[0].placement_type);
+}
+
+test "analyzeBonds keeps amine N next to sp3 carbons as sp3" {
+    // C1-N(-H)-C2, no pi system on either carbon.
+    var atoms = [_]ccd.CompAtom{ compAtom("C1", 'C'), compAtom("N", 'N'), compAtom("C2", 'C'), compAtom("H", 'H') };
+    var bonds = [_]ccd.CompBond{
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 1, .order = .single },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 2, .order = .single },
+        .{ .atom_idx_1 = 1, .atom_idx_2 = 3, .order = .single },
+    };
+    const comp = ccd.Component{ .comp_id = "TST", .comp_type = "non-polymer", .atoms = &atoms, .bonds = &bonds };
+    try testing.expectEqual(Hybridization.sp3, analyzeBonds(&comp, 1, 0, 0).hybridization);
+}
+
+test "analyzeBonds keeps ammonium N next to carbonyl as sp3" {
+    // NH3+ on a carbonyl carbon: valence 4, not conjugated.
+    var atoms = [_]ccd.CompAtom{
+        compAtom("C", 'C'),  compAtom("O", 'O'),  compAtom("N", 'N'),
+        compAtom("H1", 'H'), compAtom("H2", 'H'), compAtom("H3", 'H'),
+    };
+    var bonds = [_]ccd.CompBond{
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 1, .order = .double },
+        .{ .atom_idx_1 = 0, .atom_idx_2 = 2, .order = .single },
+        .{ .atom_idx_1 = 2, .atom_idx_2 = 3, .order = .single },
+        .{ .atom_idx_1 = 2, .atom_idx_2 = 4, .order = .single },
+        .{ .atom_idx_1 = 2, .atom_idx_2 = 5, .order = .single },
+    };
+    const comp = ccd.Component{ .comp_id = "TST", .comp_type = "non-polymer", .atoms = &atoms, .bonds = &bonds };
+    try testing.expectEqual(Hybridization.sp3, analyzeBonds(&comp, 2, 0, 0).hybridization);
 }
 
 test "analyzeBonds demotes sp to sp2 on valence overflow" {
