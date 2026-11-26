@@ -60,17 +60,17 @@ pub const Stage = enum {
     }
 };
 
-const n_stages = std.meta.fields(Stage).len;
+const n_stages = @typeInfo(Stage).@"enum".field_names.len;
 
 pub const StageTimes = struct {
     ns: [n_stages]u64 = @splat(0),
 
     pub fn addNs(self: *StageTimes, stage: Stage, ns: u64) void {
-        self.ns[@intFromEnum(stage)] += ns;
+        self.ns[@backingInt(stage)] += ns;
     }
 
     pub fn get(self: StageTimes, stage: Stage) u64 {
-        return self.ns[@intFromEnum(stage)];
+        return self.ns[@backingInt(stage)];
     }
 
     pub fn merge(self: *StageTimes, other: StageTimes) void {

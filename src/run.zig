@@ -839,7 +839,7 @@ test "processFile processes tiny.cif via mmcif path" {
     defer allocator.free(input_path);
     const output_path = try tmp_dir.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(output_path);
-    const out_cif = try std.fmt.allocPrint(allocator, "{s}/out.cif", .{output_path});
+    const out_cif = try allocator.print("{s}/out.cif", .{output_path});
     defer allocator.free(out_cif);
 
     const result = try processFile(allocator, .{
@@ -873,7 +873,7 @@ test "processFile processes tiny.pdb via pdb path" {
     defer allocator.free(input_path);
     const output_path = try tmp_dir.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(output_path);
-    const out_pdb = try std.fmt.allocPrint(allocator, "{s}/out.pdb", .{output_path});
+    const out_pdb = try allocator.print("{s}/out.pdb", .{output_path});
     defer allocator.free(out_pdb);
 
     const result = try processFile(allocator, .{
@@ -906,7 +906,7 @@ test "processFile strip_h removes existing hydrogens before placement" {
     defer allocator.free(input_path);
     const out_dir = try tmp_dir.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(out_dir);
-    const out_path = try std.fmt.allocPrint(allocator, "{s}/out.cif", .{out_dir});
+    const out_path = try allocator.print("{s}/out.cif", .{out_dir});
     defer allocator.free(out_path);
 
     // Without strip_h: the existing H should be counted as skipped_existing

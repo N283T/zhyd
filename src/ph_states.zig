@@ -127,7 +127,7 @@ test "user overrides win over pKa-derived states" {
     try testing.expectEqual(protonation.HisState.hip, entry.state.his);
 
     const res = mdl.residues.items[his_idx.?];
-    const line = try std.fmt.allocPrint(testing.allocator, "{s}:{d} HIS HID\n", .{ mdl.chains.items[res.chain_idx].authSlice(), res.auth_seq_id });
+    const line = try testing.allocator.print("{s}:{d} HIS HID\n", .{ mdl.chains.items[res.chain_idx].authSlice(), res.auth_seq_id });
     defer testing.allocator.free(line);
     var user = try protonation.parseString(testing.allocator, line);
     defer user.deinit();

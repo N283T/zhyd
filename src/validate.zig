@@ -13,7 +13,7 @@ const mover_mod = @import("optimize/mover.zig");
 pub const Issue = struct {
     kind: Kind,
     atom_idx: u32,
-    detail: [64]u8 = .{0} ** 64,
+    detail: [64]u8 = @splat(0),
     detail_len: u8 = 0,
 
     pub const Kind = enum {

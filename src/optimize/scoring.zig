@@ -382,7 +382,9 @@ pub fn scoreMoverExcluding(
             for (scratch.items) |static_idx| {
                 if (score_ctx.exclusions.excludes(ai, score_ctx.static_atom_indices[static_idx])) continue;
                 total += scorePairSoA(
-                    a_pos, a_radius, a_flags,
+                    a_pos,
+                    a_radius,
+                    a_flags,
                     score_ctx.static_positions[static_idx],
                     score_ctx.static_radii[static_idx],
                     score_ctx.static_flags[static_idx],
@@ -395,7 +397,9 @@ pub fn scoreMoverExcluding(
             for (0..score_ctx.static_atom_indices.len) |static_idx| {
                 if (score_ctx.exclusions.excludes(ai, score_ctx.static_atom_indices[static_idx])) continue;
                 total += scorePairSoA(
-                    a_pos, a_radius, a_flags,
+                    a_pos,
+                    a_radius,
+                    a_flags,
                     score_ctx.static_positions[static_idx],
                     score_ctx.static_radii[static_idx],
                     score_ctx.static_flags[static_idx],
@@ -418,7 +422,9 @@ pub fn scoreMoverExcluding(
                 if (isMoverAtom(m, oi)) continue;
                 if (score_ctx.exclusions.excludes(ai, oi)) continue;
                 total += scorePairSoA(
-                    a_pos, a_radius, a_flags,
+                    a_pos,
+                    a_radius,
+                    a_flags,
                     atoms[oi].pos,
                     score_ctx.mover_atom_radii[oi],
                     atoms[oi].flags,
@@ -461,7 +467,9 @@ pub fn scoreMoverPair(
             if (isMoverAtom(a, oi)) continue;
             if (score_ctx.exclusions.excludes(ai, oi)) continue;
             total += scorePairSoA(
-                a_pos, a_radius, a_flags,
+                a_pos,
+                a_radius,
+                a_flags,
                 atoms[oi].pos,
                 score_ctx.mover_atom_radii[oi],
                 atoms[oi].flags,
@@ -565,22 +573,22 @@ test "scorePairSoA produces identical results to scorePair" {
 
     // Test all 4 branches with the same atom configurations
     const TestCase = struct {
-        pos_a: math_mod.Vec3(f32), r_a: f32, flags_a: element.AtomFlags,
-        pos_b: math_mod.Vec3(f32), r_b: f32, flags_b: element.AtomFlags,
+        pos_a: math_mod.Vec3(f32),
+        r_a: f32,
+        flags_a: element.AtomFlags,
+        pos_b: math_mod.Vec3(f32),
+        r_b: f32,
+        flags_b: element.AtomFlags,
     };
     const test_cases = [_]TestCase{
         // Branch 1: No interaction (far apart)
-        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{},
-           .pos_b = .{ .x = 10, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{} },
+        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{}, .pos_b = .{ .x = 10, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{} },
         // Branch 2: Contact (within threshold, sum_r=3.4, threshold=3.9)
-        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{},
-           .pos_b = .{ .x = 3.6, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{} },
+        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{}, .pos_b = .{ .x = 3.6, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{} },
         // Branch 3: Bump (overlap, no H-bond)
-        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{},
-           .pos_b = .{ .x = 3.0, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{} },
+        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{}, .pos_b = .{ .x = 3.0, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{} },
         // Branch 4: H-bond (overlap with donor + acceptor)
-        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{ .donor = true },
-           .pos_b = .{ .x = 3.0, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{ .acceptor = true } },
+        .{ .pos_a = .{ .x = 0, .y = 0, .z = 0 }, .r_a = 1.7, .flags_a = .{ .donor = true }, .pos_b = .{ .x = 3.0, .y = 0, .z = 0 }, .r_b = 1.7, .flags_b = .{ .acceptor = true } },
     };
 
     for (test_cases) |tc| {

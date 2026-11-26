@@ -63,14 +63,39 @@ pub const AtomType = enum(u8) {
     I, // iodine (2.10 Å, acceptor)
 
     // Metals
-    Li, Na, Mg, K, Ca, Mn, Fe, Co, Ni, Cu, Zn, As, Rb, Sr, Mo, Ag, Cd, Sn, Cs, Ba, W, Pt, Au, Hg, Pb, U,
+    Li,
+    Na,
+    Mg,
+    K,
+    Ca,
+    Mn,
+    Fe,
+    Co,
+    Ni,
+    Cu,
+    Zn,
+    As,
+    Rb,
+    Sr,
+    Mo,
+    Ag,
+    Cd,
+    Sn,
+    Cs,
+    Ba,
+    W,
+    Pt,
+    Au,
+    Hg,
+    Pb,
+    U,
 
     unknown,
 
-    const count = @typeInfo(AtomType).@"enum".fields.len;
+    const count = @typeInfo(AtomType).@"enum".field_names.len;
 
     pub fn info(self: AtomType) AtomTypeInfo {
-        return atom_type_table[@intFromEnum(self)];
+        return atom_type_table[@backingInt(self)];
     }
 };
 
@@ -87,61 +112,61 @@ const atom_type_table: [AtomType.count]AtomTypeInfo = build: {
     var table: [AtomType.count]AtomTypeInfo = undefined;
 
     // Hydrogen variants
-    table[@intFromEnum(AtomType.H)] = .{ .explicit_radius = 1.22, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = NONE };
-    table[@intFromEnum(AtomType.Har)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = AR };
-    table[@intFromEnum(AtomType.Hpol)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = D };
-    table[@intFromEnum(AtomType.Ha_p)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = DAR };
-    table[@intFromEnum(AtomType.HOd)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = HBD };
+    table[@backingInt(AtomType.H)] = .{ .explicit_radius = 1.22, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = NONE };
+    table[@backingInt(AtomType.Har)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = AR };
+    table[@backingInt(AtomType.Hpol)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = D };
+    table[@backingInt(AtomType.Ha_p)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = DAR };
+    table[@backingInt(AtomType.HOd)] = .{ .explicit_radius = 1.05, .implicit_radius = 0.00, .covalent_radius = 0.30, .flags = HBD };
 
     // Carbon variants
-    table[@intFromEnum(AtomType.C)] = .{ .explicit_radius = 1.70, .implicit_radius = 1.90, .covalent_radius = 0.77, .flags = NONE };
-    table[@intFromEnum(AtomType.Car)] = .{ .explicit_radius = 1.75, .implicit_radius = 1.75, .covalent_radius = 0.77, .flags = ARA };
-    table[@intFromEnum(AtomType.C_eq_O)] = .{ .explicit_radius = 1.65, .implicit_radius = 1.65, .covalent_radius = 0.80, .flags = NONE };
+    table[@backingInt(AtomType.C)] = .{ .explicit_radius = 1.70, .implicit_radius = 1.90, .covalent_radius = 0.77, .flags = NONE };
+    table[@backingInt(AtomType.Car)] = .{ .explicit_radius = 1.75, .implicit_radius = 1.75, .covalent_radius = 0.77, .flags = ARA };
+    table[@backingInt(AtomType.C_eq_O)] = .{ .explicit_radius = 1.65, .implicit_radius = 1.65, .covalent_radius = 0.80, .flags = NONE };
 
     // Nitrogen variants
-    table[@intFromEnum(AtomType.N)] = .{ .explicit_radius = 1.55, .implicit_radius = 1.70, .covalent_radius = 0.70, .flags = NONE };
-    table[@intFromEnum(AtomType.Nacc)] = .{ .explicit_radius = 1.55, .implicit_radius = 1.70, .covalent_radius = 0.70, .flags = A };
+    table[@backingInt(AtomType.N)] = .{ .explicit_radius = 1.55, .implicit_radius = 1.70, .covalent_radius = 0.70, .flags = NONE };
+    table[@backingInt(AtomType.Nacc)] = .{ .explicit_radius = 1.55, .implicit_radius = 1.70, .covalent_radius = 0.70, .flags = A };
 
     // Others
-    table[@intFromEnum(AtomType.O)] = .{ .explicit_radius = 1.40, .implicit_radius = 1.50, .covalent_radius = 0.66, .flags = A };
-    table[@intFromEnum(AtomType.P)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.80, .covalent_radius = 1.80, .flags = NONE };
-    table[@intFromEnum(AtomType.S)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.90, .covalent_radius = 1.04, .flags = A };
-    table[@intFromEnum(AtomType.Se)] = .{ .explicit_radius = 1.90, .implicit_radius = 1.90, .covalent_radius = 1.17, .flags = A };
-    table[@intFromEnum(AtomType.F)] = .{ .explicit_radius = 1.30, .implicit_radius = 1.30, .covalent_radius = 0.58, .flags = A };
-    table[@intFromEnum(AtomType.Cl)] = .{ .explicit_radius = 1.77, .implicit_radius = 1.77, .covalent_radius = 0.99, .flags = A };
-    table[@intFromEnum(AtomType.Br)] = .{ .explicit_radius = 1.95, .implicit_radius = 1.95, .covalent_radius = 1.14, .flags = A };
-    table[@intFromEnum(AtomType.I)] = .{ .explicit_radius = 2.10, .implicit_radius = 2.10, .covalent_radius = 1.33, .flags = A };
+    table[@backingInt(AtomType.O)] = .{ .explicit_radius = 1.40, .implicit_radius = 1.50, .covalent_radius = 0.66, .flags = A };
+    table[@backingInt(AtomType.P)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.80, .covalent_radius = 1.80, .flags = NONE };
+    table[@backingInt(AtomType.S)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.90, .covalent_radius = 1.04, .flags = A };
+    table[@backingInt(AtomType.Se)] = .{ .explicit_radius = 1.90, .implicit_radius = 1.90, .covalent_radius = 1.17, .flags = A };
+    table[@backingInt(AtomType.F)] = .{ .explicit_radius = 1.30, .implicit_radius = 1.30, .covalent_radius = 0.58, .flags = A };
+    table[@backingInt(AtomType.Cl)] = .{ .explicit_radius = 1.77, .implicit_radius = 1.77, .covalent_radius = 0.99, .flags = A };
+    table[@backingInt(AtomType.Br)] = .{ .explicit_radius = 1.95, .implicit_radius = 1.95, .covalent_radius = 1.14, .flags = A };
+    table[@backingInt(AtomType.I)] = .{ .explicit_radius = 2.10, .implicit_radius = 2.10, .covalent_radius = 1.33, .flags = A };
 
     // Metals
-    table[@intFromEnum(AtomType.Li)] = .{ .explicit_radius = 1.82, .implicit_radius = 1.82, .covalent_radius = 1.23, .flags = M };
-    table[@intFromEnum(AtomType.Na)] = .{ .explicit_radius = 2.27, .implicit_radius = 2.27, .covalent_radius = 1.54, .flags = M };
-    table[@intFromEnum(AtomType.Mg)] = .{ .explicit_radius = 1.73, .implicit_radius = 1.73, .covalent_radius = 1.36, .flags = M };
-    table[@intFromEnum(AtomType.K)] = .{ .explicit_radius = 2.75, .implicit_radius = 2.75, .covalent_radius = 1.96, .flags = M };
-    table[@intFromEnum(AtomType.Ca)] = .{ .explicit_radius = 2.31, .implicit_radius = 2.31, .covalent_radius = 1.74, .flags = M };
-    table[@intFromEnum(AtomType.Mn)] = .{ .explicit_radius = 1.73, .implicit_radius = 1.73, .covalent_radius = 1.17, .flags = M };
-    table[@intFromEnum(AtomType.Fe)] = .{ .explicit_radius = 1.65, .implicit_radius = 1.65, .covalent_radius = 1.17, .flags = M };
-    table[@intFromEnum(AtomType.Co)] = .{ .explicit_radius = 1.67, .implicit_radius = 1.67, .covalent_radius = 1.16, .flags = M };
-    table[@intFromEnum(AtomType.Ni)] = .{ .explicit_radius = 1.50, .implicit_radius = 1.50, .covalent_radius = 1.15, .flags = M };
-    table[@intFromEnum(AtomType.Cu)] = .{ .explicit_radius = 1.52, .implicit_radius = 1.52, .covalent_radius = 1.17, .flags = M };
-    table[@intFromEnum(AtomType.Zn)] = .{ .explicit_radius = 1.65, .implicit_radius = 1.65, .covalent_radius = 1.25, .flags = M };
-    table[@intFromEnum(AtomType.As)] = .{ .explicit_radius = 1.85, .implicit_radius = 1.85, .covalent_radius = 1.21, .flags = NONE };
-    table[@intFromEnum(AtomType.Rb)] = .{ .explicit_radius = 2.75, .implicit_radius = 2.75, .covalent_radius = 2.11, .flags = M };
-    table[@intFromEnum(AtomType.Sr)] = .{ .explicit_radius = 2.49, .implicit_radius = 2.49, .covalent_radius = 1.92, .flags = M };
-    table[@intFromEnum(AtomType.Mo)] = .{ .explicit_radius = 1.90, .implicit_radius = 1.90, .covalent_radius = 1.30, .flags = M };
-    table[@intFromEnum(AtomType.Ag)] = .{ .explicit_radius = 1.72, .implicit_radius = 1.72, .covalent_radius = 1.34, .flags = M };
-    table[@intFromEnum(AtomType.Cd)] = .{ .explicit_radius = 1.58, .implicit_radius = 1.58, .covalent_radius = 1.48, .flags = M };
-    table[@intFromEnum(AtomType.Sn)] = .{ .explicit_radius = 2.17, .implicit_radius = 2.17, .covalent_radius = 1.40, .flags = M };
-    table[@intFromEnum(AtomType.Cs)] = .{ .explicit_radius = 3.01, .implicit_radius = 3.01, .covalent_radius = 2.25, .flags = M };
-    table[@intFromEnum(AtomType.Ba)] = .{ .explicit_radius = 2.68, .implicit_radius = 2.68, .covalent_radius = 1.98, .flags = M };
-    table[@intFromEnum(AtomType.W)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.80, .covalent_radius = 1.30, .flags = M };
-    table[@intFromEnum(AtomType.Pt)] = .{ .explicit_radius = 1.75, .implicit_radius = 1.75, .covalent_radius = 1.28, .flags = M };
-    table[@intFromEnum(AtomType.Au)] = .{ .explicit_radius = 1.66, .implicit_radius = 1.66, .covalent_radius = 1.34, .flags = M };
-    table[@intFromEnum(AtomType.Hg)] = .{ .explicit_radius = 1.55, .implicit_radius = 1.55, .covalent_radius = 1.49, .flags = M };
-    table[@intFromEnum(AtomType.Pb)] = .{ .explicit_radius = 2.02, .implicit_radius = 2.02, .covalent_radius = 1.47, .flags = M };
-    table[@intFromEnum(AtomType.U)] = .{ .explicit_radius = 1.86, .implicit_radius = 1.86, .covalent_radius = 1.42, .flags = M };
+    table[@backingInt(AtomType.Li)] = .{ .explicit_radius = 1.82, .implicit_radius = 1.82, .covalent_radius = 1.23, .flags = M };
+    table[@backingInt(AtomType.Na)] = .{ .explicit_radius = 2.27, .implicit_radius = 2.27, .covalent_radius = 1.54, .flags = M };
+    table[@backingInt(AtomType.Mg)] = .{ .explicit_radius = 1.73, .implicit_radius = 1.73, .covalent_radius = 1.36, .flags = M };
+    table[@backingInt(AtomType.K)] = .{ .explicit_radius = 2.75, .implicit_radius = 2.75, .covalent_radius = 1.96, .flags = M };
+    table[@backingInt(AtomType.Ca)] = .{ .explicit_radius = 2.31, .implicit_radius = 2.31, .covalent_radius = 1.74, .flags = M };
+    table[@backingInt(AtomType.Mn)] = .{ .explicit_radius = 1.73, .implicit_radius = 1.73, .covalent_radius = 1.17, .flags = M };
+    table[@backingInt(AtomType.Fe)] = .{ .explicit_radius = 1.65, .implicit_radius = 1.65, .covalent_radius = 1.17, .flags = M };
+    table[@backingInt(AtomType.Co)] = .{ .explicit_radius = 1.67, .implicit_radius = 1.67, .covalent_radius = 1.16, .flags = M };
+    table[@backingInt(AtomType.Ni)] = .{ .explicit_radius = 1.50, .implicit_radius = 1.50, .covalent_radius = 1.15, .flags = M };
+    table[@backingInt(AtomType.Cu)] = .{ .explicit_radius = 1.52, .implicit_radius = 1.52, .covalent_radius = 1.17, .flags = M };
+    table[@backingInt(AtomType.Zn)] = .{ .explicit_radius = 1.65, .implicit_radius = 1.65, .covalent_radius = 1.25, .flags = M };
+    table[@backingInt(AtomType.As)] = .{ .explicit_radius = 1.85, .implicit_radius = 1.85, .covalent_radius = 1.21, .flags = NONE };
+    table[@backingInt(AtomType.Rb)] = .{ .explicit_radius = 2.75, .implicit_radius = 2.75, .covalent_radius = 2.11, .flags = M };
+    table[@backingInt(AtomType.Sr)] = .{ .explicit_radius = 2.49, .implicit_radius = 2.49, .covalent_radius = 1.92, .flags = M };
+    table[@backingInt(AtomType.Mo)] = .{ .explicit_radius = 1.90, .implicit_radius = 1.90, .covalent_radius = 1.30, .flags = M };
+    table[@backingInt(AtomType.Ag)] = .{ .explicit_radius = 1.72, .implicit_radius = 1.72, .covalent_radius = 1.34, .flags = M };
+    table[@backingInt(AtomType.Cd)] = .{ .explicit_radius = 1.58, .implicit_radius = 1.58, .covalent_radius = 1.48, .flags = M };
+    table[@backingInt(AtomType.Sn)] = .{ .explicit_radius = 2.17, .implicit_radius = 2.17, .covalent_radius = 1.40, .flags = M };
+    table[@backingInt(AtomType.Cs)] = .{ .explicit_radius = 3.01, .implicit_radius = 3.01, .covalent_radius = 2.25, .flags = M };
+    table[@backingInt(AtomType.Ba)] = .{ .explicit_radius = 2.68, .implicit_radius = 2.68, .covalent_radius = 1.98, .flags = M };
+    table[@backingInt(AtomType.W)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.80, .covalent_radius = 1.30, .flags = M };
+    table[@backingInt(AtomType.Pt)] = .{ .explicit_radius = 1.75, .implicit_radius = 1.75, .covalent_radius = 1.28, .flags = M };
+    table[@backingInt(AtomType.Au)] = .{ .explicit_radius = 1.66, .implicit_radius = 1.66, .covalent_radius = 1.34, .flags = M };
+    table[@backingInt(AtomType.Hg)] = .{ .explicit_radius = 1.55, .implicit_radius = 1.55, .covalent_radius = 1.49, .flags = M };
+    table[@backingInt(AtomType.Pb)] = .{ .explicit_radius = 2.02, .implicit_radius = 2.02, .covalent_radius = 1.47, .flags = M };
+    table[@backingInt(AtomType.U)] = .{ .explicit_radius = 1.86, .implicit_radius = 1.86, .covalent_radius = 1.42, .flags = M };
 
     // Unknown
-    table[@intFromEnum(AtomType.unknown)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.80, .covalent_radius = 1.00, .flags = NONE };
+    table[@backingInt(AtomType.unknown)] = .{ .explicit_radius = 1.80, .implicit_radius = 1.80, .covalent_radius = 1.00, .flags = NONE };
 
     break :build table;
 };

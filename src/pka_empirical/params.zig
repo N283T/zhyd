@@ -160,10 +160,10 @@ pub const KindOverrides = struct {
     C_TERM: ?f64 = null,
 
     fn apply(self: KindOverrides, table: *KindTable) void {
-        inline for (std.meta.fields(KindOverrides)) |field| {
-            if (@field(self, field.name)) |v| {
+        inline for (@typeInfo(KindOverrides).@"struct".field_names) |field_name| {
+            if (@field(self, field_name)) |v| {
                 const kind = comptime for (std.enums.values(pka.SiteKind)) |k| {
-                    if (std.mem.eql(u8, k.name(), field.name)) break k;
+                    if (std.mem.eql(u8, k.name(), field_name)) break k;
                 } else unreachable;
                 table.set(kind, v);
             }
@@ -171,8 +171,8 @@ pub const KindOverrides = struct {
     }
 
     fn valid(self: KindOverrides, min: f64, max: f64) bool {
-        inline for (std.meta.fields(KindOverrides)) |field| {
-            if (@field(self, field.name)) |v| {
+        inline for (@typeInfo(KindOverrides).@"struct".field_names) |field_name| {
+            if (@field(self, field_name)) |v| {
                 if (!std.math.isFinite(v) or v < min or v > max) return false;
             }
         }

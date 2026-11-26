@@ -50,7 +50,6 @@ pub fn optimize(
 ) !OptResult {
     var result = OptResult{};
 
-
     var score_ctx = try buildScoreContext(allocator, movers, model.atoms.items);
     defer score_ctx.deinit(allocator);
 
@@ -568,7 +567,6 @@ fn optimizeBruteForceReference(
         movers[mi].best_orientation = best_indices[i];
     }
 }
-
 
 const testing = std.testing;
 

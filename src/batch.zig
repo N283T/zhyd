@@ -174,7 +174,7 @@ fn processFileInBatch(
     else
         safe_filename;
     const out_name = if (config.gzip_output)
-        try std.fmt.allocPrint(allocator, "{s}.gz", .{base_name})
+        try allocator.print("{s}.gz", .{base_name})
     else
         try allocator.dupe(u8, base_name);
     defer allocator.free(out_name);
@@ -597,7 +597,7 @@ pub fn run(allocator: Allocator, config: BatchConfig) !void {
     const output_dir: []const u8 = if (config.output_dir) |od|
         od
     else blk: {
-        const default = try std.fmt.allocPrint(allocator, "{s}_reduced", .{config.input_dir});
+        const default = try allocator.print("{s}_reduced", .{config.input_dir});
         break :blk default;
     };
     defer if (config.output_dir == null) allocator.free(output_dir);
