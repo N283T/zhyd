@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
 ### Added
 - `run --ph` and `batch --ph` take `--empirical-mode parity` to choose
   protonation states from the PROPKA 3 model instead of the recalibrated
@@ -29,6 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Requires Zig 0.17 (was 0.16). Output is byte-identical to the 0.16 build
+- Carboxylic and sulfonic/sulfuric acids on CCD ligands are deprotonated:
+  their acidic H is no longer placed and the terminal oxygens are charged
+  acceptors, as for Asp/Glu and the C-terminus. Phosphates are unchanged
+- Lone-pair N on CCD/inline/SDF residues (pyridine-like and imine N,
+  nitriles, non-conjugated tertiary amines) and the ring N of standard
+  nucleotides are scored as H-bond acceptors; nucleotide OP1/OP2 are charged
+
+### Fixed
+- Amide and urea N-H on CCD ligands are placed in plane (sp2) instead of
+  tetrahedrally
+- Oxygens and other atoms outside the 20 standard amino acids (ligands,
+  water, nucleic acids) got no acceptor flag or element radius during rotor
+  scoring, so OH rotors never turned toward them
 
 ## [0.4.0] - 2026-11-13
 
