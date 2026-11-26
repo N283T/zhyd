@@ -139,8 +139,14 @@ fn writeAtomLine(
     const comp = res.compIdSlice();
     switch (comp.len) {
         0 => try writer.writeAll("   "),
-        1 => { try writer.writeAll("  "); try writer.writeByte(comp[0]); },
-        2 => { try writer.writeByte(' ');  try writer.writeAll(comp); },
+        1 => {
+            try writer.writeAll("  ");
+            try writer.writeByte(comp[0]);
+        },
+        2 => {
+            try writer.writeByte(' ');
+            try writer.writeAll(comp);
+        },
         else => try writer.writeAll(comp[0..3]),
     }
 
@@ -209,8 +215,14 @@ fn writeTerLine(
     const comp = res.compIdSlice();
     switch (comp.len) {
         0 => try writer.writeAll("   "),
-        1 => { try writer.writeAll("  "); try writer.writeByte(comp[0]); },
-        2 => { try writer.writeByte(' ');  try writer.writeAll(comp); },
+        1 => {
+            try writer.writeAll("  ");
+            try writer.writeByte(comp[0]);
+        },
+        2 => {
+            try writer.writeByte(' ');
+            try writer.writeAll(comp);
+        },
         else => try writer.writeAll(comp[0..3]),
     }
 

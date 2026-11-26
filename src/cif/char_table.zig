@@ -7,7 +7,7 @@ pub const CharType = enum(u2) {
 };
 
 pub const char_table: [128]CharType = blk: {
-    var table: [128]CharType = .{.ordinary} ** 128;
+    var table: [128]CharType = @splat(.ordinary);
     // Control characters (0-32) → whitespace
     for (0..33) |i| table[i] = .whitespace;
     table[127] = .whitespace; // DEL

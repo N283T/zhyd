@@ -13,10 +13,10 @@ const std = @import("std");
 pub fn FixedString(comptime N: comptime_int) type {
     comptime std.debug.assert(N > 0 and N <= 128);
     // Minimum unsigned int wide enough to hold values 0..N.
-    const LenInt = std.meta.Int(.unsigned, std.math.log2_int_ceil(u8, N + 1));
+    const LenInt = @Int(.unsigned, std.math.log2_int_ceil(u8, N + 1));
 
     return struct {
-        buf: [N]u8 = [_]u8{' '} ** N,
+        buf: [N]u8 = @splat(' '),
         len: LenInt = 0,
 
         const Self = @This();
@@ -29,7 +29,7 @@ pub fn FixedString(comptime N: comptime_int) type {
         /// Copy `value` into the buffer, truncating to N characters.
         pub fn set(self: *Self, value: []const u8) void {
             const n: LenInt = @intCast(@min(value.len, N));
-            self.buf = [_]u8{' '} ** N;
+            self.buf = @splat(' ');
             for (0..n) |i| self.buf[i] = value[i];
             self.len = n;
         }

@@ -85,14 +85,17 @@ const polymer_comp_ids = std.StaticStringMap(void).initComptime(.{
     // Special amino acids
     .{ "MSE", {} }, .{ "SEC", {} }, .{ "PYL", {} },
     // Common modified amino acids
-    .{ "TPO", {} }, .{ "SEP", {} }, .{ "PTR", {} }, .{ "MLY", {} }, .{ "CSO", {} },
-    .{ "HYP", {} }, .{ "CSS", {} }, .{ "CME", {} }, .{ "CSD", {} }, .{ "OCS", {} },
-    .{ "KCX", {} }, .{ "LLP", {} }, .{ "M3L", {} }, .{ "ALY", {} }, .{ "CGU", {} },
+    .{ "TPO", {} },
+    .{ "SEP", {} }, .{ "PTR", {} }, .{ "MLY", {} }, .{ "CSO", {} },
+    .{ "HYP", {} }, .{ "CSS", {} }, .{ "CME", {} }, .{ "CSD", {} },
+    .{ "OCS", {} }, .{ "KCX", {} }, .{ "LLP", {} }, .{ "M3L", {} },
+    .{ "ALY", {} }, .{ "CGU", {} },
     // Standard nucleotides (RNA)
-    .{ "A",   {} }, .{ "C",   {} }, .{ "G",   {} }, .{ "U",   {} },
+    .{ "A", {} },   .{ "C", {} },
+    .{ "G", {} },   .{ "U", {} },
     // Standard nucleotides (DNA)
-    .{ "DA",  {} }, .{ "DC",  {} }, .{ "DG",  {} }, .{ "DT",  {} },
-    .{ "DI",  {} },
+      .{ "DA", {} },  .{ "DC", {} },
+    .{ "DG", {} },  .{ "DT", {} },  .{ "DI", {} },
 });
 
 fn entityTypeFromCompId(comp_id: []const u8) model_mod.residue.EntityType {
@@ -429,7 +432,7 @@ pub fn parse(allocator: Allocator, source: []const u8) PdbError!PdbParseResult {
         // If we've finished MODEL 1 and there are more atoms, skip them
         if (model_done and
             (std.mem.startsWith(u8, rec_type, "ATOM  ") or
-             std.mem.startsWith(u8, rec_type, "HETATM")))
+                std.mem.startsWith(u8, rec_type, "HETATM")))
         {
             continue;
         }

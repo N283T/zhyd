@@ -57,7 +57,7 @@ pub fn outputName(allocator: Allocator, filename: []const u8) ![]u8 {
             break;
         }
     }
-    return std.fmt.allocPrint(allocator, "{s}.json", .{base});
+    return allocator.print("{s}.json", .{base});
 }
 
 fn writeJsonlLine(writer: anytype, r: FileResult) !void {
@@ -154,7 +154,7 @@ pub fn run(allocator: Allocator, config: Config) !void {
     }
     std.debug.print("Found {d} structure files in '{s}'\n", .{ files.len, config.input_dir });
 
-    const output_dir: []const u8 = config.output_dir orelse try std.fmt.allocPrint(allocator, "{s}_pka", .{config.input_dir});
+    const output_dir: []const u8 = config.output_dir orelse try allocator.print("{s}_pka", .{config.input_dir});
     defer if (config.output_dir == null) allocator.free(output_dir);
     std.Io.Dir.cwd().createDirPath(io, output_dir) catch |err| {
         std.debug.print("Error: cannot create output directory '{s}': {s}\n", .{ output_dir, @errorName(err) });

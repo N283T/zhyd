@@ -11,7 +11,7 @@ Detailed design and feature documentation will live in separate docs.
 
 ## Requirements
 
-- [Zig](https://ziglang.org/) 0.16+
+- [Zig](https://ziglang.org/) 0.17+
 
 ## Build and test
 

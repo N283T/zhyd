@@ -164,7 +164,7 @@ fn solveExact(allocator: std.mem.Allocator, groups: []Group, members: []const u3
     // fraction through 0.5: located on a coarse pH grid, then bisected.
     var pka: [max_exact]f64 = undefined;
     var prev: [max_exact]f64 = undefined;
-    var crossing: [max_exact]?f64 = .{null} ** max_exact;
+    var crossing: [max_exact]?f64 = @splat(null);
     var ph = ph_min;
     var first = true;
     while (ph <= ph_max + 1e-9) : (ph += ph_step) {
@@ -200,7 +200,7 @@ fn fractions(a: []const f64, nprot: []const f64, n: usize, ph: f64, out: *[max_e
     var gmin: f64 = std.math.inf(f64);
     for (a, nprot) |ax, nx| gmin = @min(gmin, ax + ph * nx);
     var z: f64 = 0;
-    var acc: [max_exact]f64 = .{0} ** max_exact;
+    var acc: [max_exact]f64 = @splat(0);
     for (a, nprot, 0..) |ax, nx, x| {
         const w = std.math.pow(f64, 10.0, -(ax + ph * nx - gmin));
         z += w;

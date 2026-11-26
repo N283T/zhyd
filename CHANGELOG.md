@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   bootstrap interval for the net gain. Phase 4 in the protonation spec now
   reports it on the fitting rows, the SNase stress set and the literature set
 
+### Changed
+- Requires Zig 0.17 (was 0.16). Output is byte-identical to the 0.16 build
+
 ## [0.4.0] - 2026-11-13
 
 ### Changed

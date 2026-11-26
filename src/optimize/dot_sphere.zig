@@ -98,12 +98,12 @@ test "dot sphere uniform distribution" {
     var sphere = try DotSphere.generate(testing.allocator, 1.0, 16.0);
     defer sphere.deinit();
     // Count dots in each octant
-    var octants: [8]u32 = .{0} ** 8;
+    var octants: [8]u32 = @splat(0);
     for (sphere.points) |p| {
         const idx: u3 = @intCast(
             (@as(u3, if (p.x > 0) 1 else 0)) |
-            (@as(u3, if (p.y > 0) 1 else 0) << 1) |
-            (@as(u3, if (p.z > 0) 1 else 0) << 2),
+                (@as(u3, if (p.y > 0) 1 else 0) << 1) |
+                (@as(u3, if (p.z > 0) 1 else 0) << 2),
         );
         octants[idx] += 1;
     }

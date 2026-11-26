@@ -45,7 +45,7 @@ const alias_pool = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234567
 fn encodePdb(allocator: std.mem.Allocator, mdl: *const Model, options: Options) !Encoded {
     var aliases: std.StringHashMapUnmanaged(u8) = .empty;
     defer aliases.deinit(allocator);
-    var used = [_]bool{false} ** 256;
+    var used: [256]bool = @splat(false);
     // Keep single-character auth IDs first so they map to themselves.
     for (mdl.chains.items) |*chain| {
         const auth = chain.authSlice();

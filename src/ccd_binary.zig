@@ -17,7 +17,7 @@ const builtin = @import("builtin");
 
 comptime {
     // Binary format uses native byte order for packed structs; only LE is supported.
-    std.debug.assert(builtin.cpu.arch.endian() == .little);
+    std.debug.assert(builtin.target.cpu.arch.endian() == .little);
 }
 const Allocator = std.mem.Allocator;
 const ccd = @import("ccd.zig");
@@ -119,7 +119,7 @@ pub const PackedBond = extern struct {
         return .{
             .atom_idx_1 = b.atom_idx_1,
             .atom_idx_2 = b.atom_idx_2,
-            .order = @intFromEnum(b.order),
+            .order = @backingInt(b.order),
             .flags = flags,
         };
     }
@@ -128,8 +128,8 @@ pub const PackedBond = extern struct {
         return .{
             .atom_idx_1 = self.atom_idx_1,
             .atom_idx_2 = self.atom_idx_2,
-            .order = if (self.order <= @intFromEnum(ccd.BondOrder.unknown))
-                @enumFromInt(self.order)
+            .order = if (self.order <= @backingInt(ccd.BondOrder.unknown))
+                @fromBackingInt(@intCast(self.order))
             else
                 .unknown,
             .aromatic = (self.flags & 0x01) != 0,

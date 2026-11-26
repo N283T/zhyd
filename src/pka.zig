@@ -170,9 +170,9 @@ pub fn parseParameters(allocator: std.mem.Allocator, json: []const u8) !std.json
 
 /// Compare every numeric field, ignoring the version label.
 fn sameValues(a: Parameters, b: Parameters) bool {
-    inline for (std.meta.fields(Parameters)) |field| {
-        if (comptime std.mem.eql(u8, field.name, "version")) continue;
-        if (@field(a, field.name) != @field(b, field.name)) return false;
+    inline for (@typeInfo(Parameters).@"struct".field_names) |field_name| {
+        if (comptime std.mem.eql(u8, field_name, "version")) continue;
+        if (@field(a, field_name) != @field(b, field_name)) return false;
     }
     return true;
 }

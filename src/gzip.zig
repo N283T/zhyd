@@ -98,10 +98,9 @@ test "readGzip decompresses gzip store block" {
 
     const gz_data = [_]u8{
         0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
-        0x01, 0x0c, 0x00, 0xf3, 0xff,
-        'H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '\n',
-        0xd5, 0xe0, 0x39, 0xb7,
-        0x0c, 0x00, 0x00, 0x00,
+        0x01, 0x0c, 0x00, 0xf3, 0xff, 'H',  'e',  'l',  'l',  'o',
+        ' ',  'w',  'o',  'r',  'l',  'd',  '\n', 0xd5, 0xe0, 0x39,
+        0xb7, 0x0c, 0x00, 0x00, 0x00,
     };
     try tmp_dir.dir.writeFile(io, .{ .sub_path = "test.gz", .data = &gz_data });
 
@@ -121,10 +120,9 @@ test "readGzipLimit rejects decompressed data above limit" {
 
     const gz_data = [_]u8{
         0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
-        0x01, 0x0c, 0x00, 0xf3, 0xff,
-        'H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '\n',
-        0xd5, 0xe0, 0x39, 0xb7,
-        0x0c, 0x00, 0x00, 0x00,
+        0x01, 0x0c, 0x00, 0xf3, 0xff, 'H',  'e',  'l',  'l',  'o',
+        ' ',  'w',  'o',  'r',  'l',  'd',  '\n', 0xd5, 0xe0, 0x39,
+        0xb7, 0x0c, 0x00, 0x00, 0x00,
     };
     try tmp_dir.dir.writeFile(io, .{ .sub_path = "test.gz", .data = &gz_data });
 
@@ -173,7 +171,7 @@ test "GzipWriter writes gzip output" {
 
     const tmp_path = try tmp_dir.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(tmp_path);
-    const out_path = try std.fmt.allocPrint(allocator, "{s}/out.gz", .{tmp_path});
+    const out_path = try allocator.print("{s}/out.gz", .{tmp_path});
     defer allocator.free(out_path);
 
     var gw = try GzipWriter.init(allocator, out_path);

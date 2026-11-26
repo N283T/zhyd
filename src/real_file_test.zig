@@ -443,9 +443,9 @@ fn runAtPhWith(allocator: std.mem.Allocator, tmp: *std.testing.TmpDir, ph: f32, 
     const io = std.testing.io;
     const dir = try tmp.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(dir);
-    const out_cif = try std.fmt.allocPrint(allocator, "{s}/out.cif", .{dir});
+    const out_cif = try allocator.print("{s}/out.cif", .{dir});
     defer allocator.free(out_cif);
-    const state_json = try std.fmt.allocPrint(allocator, "{s}/state.json", .{dir});
+    const state_json = try allocator.print("{s}/state.json", .{dir});
     defer allocator.free(state_json);
     _ = try zhyd.run.processFile(allocator, .{
         .input_path = "examples/data/1L2Y.cif.gz",
